@@ -28,6 +28,7 @@ use crate::core::theme::palette;
 use crate::core::time::{Duration, Instant};
 use crate::core::touch;
 use crate::core::widget::Id;
+use crate::core::widget::operation::accessible::{Accessible, Role};
 use crate::core::widget::operation::{self, Operation};
 use crate::core::widget::tree::{self, Tree};
 use crate::core::window;
@@ -319,6 +320,15 @@ where
         renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
+        operation.accessible(
+            None,
+            layout.bounds(),
+            &Accessible {
+                role: Role::Button,
+                disabled: self.on_press.is_none(),
+                ..Accessible::default()
+            },
+        );
         let state = tree.state.downcast_mut::<State>();
 
         operation.focusable(None, layout.bounds(), state);
