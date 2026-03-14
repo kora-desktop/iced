@@ -82,6 +82,11 @@ where
         }
     }
 
+    /// Returns the current window title.
+    pub fn title(&self) -> &str {
+        &self.title
+    }
+
     pub fn viewport(&self) -> &Viewport {
         &self.viewport
     }
@@ -126,6 +131,16 @@ where
     #[cfg(all(feature = "automation", target_os = "linux"))]
     pub fn clear_cursor(&mut self) {
         self.cursor_position = None;
+    }
+
+    /// Sets the cursor position from logical coordinates.
+    ///
+    /// Used by synthetic a11y events to keep the state in sync
+    /// with injected `CursorMoved` events.
+    pub fn set_cursor_position(&mut self, logical: crate::core::Point) {
+        let scale = f64::from(self.viewport.scale_factor());
+        self.cursor_position =
+            Some(winit::dpi::LogicalPosition::new(logical.x, logical.y).to_physical(scale));
     }
 
     pub fn modifiers(&self) -> winit::keyboard::ModifiersState {
