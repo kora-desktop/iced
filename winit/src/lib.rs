@@ -119,6 +119,31 @@ fn drive_to_completion<F: Future<Output = ()>>(future: F) {
     }
 }
 
+/// The program's future: its state, windows, surfaces and renderers.
+///
+/// Ended when the event loop starts exiting, while the display connection is
+/// still open. Dropped after `run_app` returns, it would release GPU objects
+/// (EGL tears down Wayland proxies) on a connection that is already closed.
+struct ProgramFuture<F>(Option<std::pin::Pin<Box<F>>>);
+
+impl<F: Future<Output = ()>> ProgramFuture<F> {
+    fn new(future: F) -> Self {
+        Self(Some(Box::pin(future)))
+    }
+
+    #[cfg_attr(feature = "off-thread-render", allow(dead_code))]
+    fn poll(&mut self, context: &mut task::Context<'_>) -> task::Poll<()> {
+        match self.0.as_mut() {
+            Some(future) => future.as_mut().poll(context),
+            None => task::Poll::Ready(()),
+        }
+    }
+
+    fn end(&mut self) {
+        self.0 = None;
+    }
+}
+
 /// Runs a [`Program`] with the provided settings.
 pub fn run<P>(program: P) -> Result<(), Error>
 where
@@ -203,7 +228,7 @@ where
 
     // Default: the program future is driven inline on the main (platform) thread.
     #[cfg(not(feature = "off-thread-render"))]
-    let instance = Box::pin(run_instance::<P>(
+    let instance = ProgramFuture::new(run_instance::<P>(
         program,
         runtime,
         proxy.clone(),
@@ -278,16 +303,15 @@ where
             .expect("spawn iced render thread");
 
         // The main-thread Runner no longer drives a program future.
-        Box::pin(std::future::pending::<()>())
+        ProgramFuture::new(std::future::pending::<()>())
     };
 
     let context = task::Context::from_waker(task::noop_waker_ref());
 
     struct Runner<Message: 'static, F> {
-        // Off-thread mode never polls these — the worker drives the program
-        // future — but the Runner still owns them so they outlive the loop.
-        #[cfg_attr(feature = "off-thread-render", allow(dead_code))]
-        instance: std::pin::Pin<Box<F>>,
+        // Off-thread mode never polls these: the worker drives the program
+        // future.
+        instance: ProgramFuture<F>,
         #[cfg_attr(feature = "off-thread-render", allow(dead_code))]
         context: task::Context<'static>,
         id: Option<String>,
@@ -393,6 +417,12 @@ where
             );
         }
 
+        fn exiting(&mut self, _event_loop: &winit::event_loop::ActiveEventLoop) {
+            // A loop that stops on a connection error leaves the program
+            // mid-flight; it must not outlive the connection.
+            self.instance.end();
+        }
+
         fn about_to_wait(&mut self, event_loop: &winit::event_loop::ActiveEventLoop) {
             // Poll popup events from winit BEFORE processing AboutToWait,
             // so they're in the event channel when AboutToWait dispatches events.
@@ -496,7 +526,7 @@ where
 
             loop {
                 #[cfg(not(feature = "off-thread-render"))]
-                let poll = self.instance.as_mut().poll(&mut self.context);
+                let poll = self.instance.poll(&mut self.context);
 
                 // Off-thread mode: the worker thread drives the program future, so
                 // the main thread never polls it — it only pumps main-thread-only
@@ -4208,5 +4238,42 @@ fn run_clipboard<Message: Send>(
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::{AtomicBool, Ordering};
+
+    /// Stands in for a window's GPU surface: records when it is released.
+    struct Surface(Arc<AtomicBool>);
+
+    impl Drop for Surface {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[test]
+    fn ending_a_running_program_releases_its_state_at_once() {
+        let released = Arc::new(AtomicBool::new(false));
+        let surface = Surface(released.clone());
+        let mut program = ProgramFuture::new(async move {
+            let _surface = surface;
+            std::future::pending::<()>().await;
+        });
+        let mut context = task::Context::from_waker(task::noop_waker_ref());
+
+        assert!(program.poll(&mut context).is_pending());
+        assert!(!released.load(Ordering::SeqCst), "held while it runs");
+
+        program.end();
+
+        assert!(
+            released.load(Ordering::SeqCst),
+            "released when the loop exits, not when the runner is dropped"
+        );
+        assert!(program.poll(&mut context).is_ready());
     }
 }
