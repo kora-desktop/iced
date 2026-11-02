@@ -164,6 +164,16 @@ where
         self
     }
 
+    /// Shows at most `lines` lines of the [`Text`], like CSS `-webkit-line-clamp`.
+    ///
+    /// The text wraps as its [`Wrapping`] says, and its last shown line ends with its
+    /// [`Ellipsis`]: [`Ellipsis::End`] unless another one is set. Shorter text keeps its
+    /// own height.
+    pub fn max_lines(mut self, lines: usize) -> Self {
+        self.format.max_lines = Some(lines.max(1));
+        self
+    }
+
     /// Sets the letter spacing of the [`Text`] in pixels.
     ///
     /// Extra horizontal space added between each character glyph. As in CSS,
@@ -303,6 +313,7 @@ pub struct Format<Font> {
     pub shaping: Shaping,
     pub wrapping: Wrapping,
     pub ellipsis: Ellipsis,
+    pub max_lines: Option<usize>,
     pub letter_spacing: Option<f32>,
 }
 
@@ -319,6 +330,7 @@ impl<Font> Default for Format<Font> {
             shaping: Shaping::default(),
             wrapping: Wrapping::default(),
             ellipsis: Ellipsis::default(),
+            max_lines: None,
             letter_spacing: None,
         }
     }
@@ -336,10 +348,20 @@ where
     Renderer: text::Renderer,
 {
     let node = layout::sized(limits, format.width, format.height, |limits| {
-        let bounds = limits.max();
+        let mut bounds = limits.max();
+        let mut ellipsis = format.ellipsis;
 
         let size = format.size.unwrap_or_else(|| renderer.default_size());
         let font = format.font.unwrap_or_else(|| renderer.default_font());
+
+        // A box exactly that many lines tall: the text engine clamps it to whole lines.
+        if let Some(lines) = format.max_lines {
+            let line_height = format.line_height.to_absolute(size).0;
+            bounds.height = bounds.height.min(line_height * lines as f32);
+            if ellipsis == Ellipsis::None {
+                ellipsis = Ellipsis::End;
+            }
+        }
 
         let _ = paragraph.update(text::Text {
             content,
@@ -351,7 +373,7 @@ where
             align_y: format.align_y,
             shaping: format.shaping,
             wrapping: format.wrapping,
-            ellipsis: format.ellipsis,
+            ellipsis,
             hint_factor: renderer.scale_factor(),
             letter_spacing: format.letter_spacing,
         });
