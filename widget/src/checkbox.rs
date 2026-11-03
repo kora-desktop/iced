@@ -308,6 +308,7 @@ where
                             shaping: self.shaping,
                             wrapping: self.wrapping,
                             ellipsis: text::Ellipsis::None,
+                            max_lines: None,
                             letter_spacing: self.letter_spacing.map(|p| p.0),
                         },
                     )
