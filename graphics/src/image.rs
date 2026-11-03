@@ -197,6 +197,13 @@ pub fn load(handle: &image::Handle) -> Result<Buffer, image::Error> {
 
     let (width, height, pixels) = match handle {
         image::Handle::Path(_, path) => {
+            if !crate::file::is_regular(path) {
+                return Err(image::Error::Inaccessible(std::sync::Arc::new(std::io::Error::new(
+                    std::io::ErrorKind::InvalidInput,
+                    "not a regular file",
+                ))));
+            }
+
             let image = open_image(path).map_err(to_error)?;
 
             let operation = std::fs::File::open(path)

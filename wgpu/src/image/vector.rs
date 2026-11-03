@@ -6,7 +6,6 @@ use crate::image::grace::Idle;
 use resvg::tiny_skia;
 use resvg::usvg;
 use rustc_hash::{FxHashMap, FxHashSet};
-use std::fs;
 use std::panic;
 
 /// Entry in cache corresponding to an svg handle
@@ -75,7 +74,7 @@ impl Cache {
         };
 
         let svg = match handle.data() {
-            svg::Data::Path(path) => fs::read_to_string(path)
+            svg::Data::Path(path) => crate::graphics::file::read_to_string(path)
                 .ok()
                 .and_then(|contents| usvg::Tree::from_str(&contents, &options).ok())
                 .map(Svg::Loaded)
