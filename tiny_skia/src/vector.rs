@@ -7,7 +7,6 @@ use tiny_skia::Transform;
 
 use std::cell::RefCell;
 use std::collections::hash_map;
-use std::fs;
 use std::panic;
 
 #[derive(Debug)]
@@ -113,7 +112,7 @@ impl Cache {
 
         if let hash_map::Entry::Vacant(entry) = self.trees.entry(id) {
             let svg = match handle.data() {
-                Data::Path(path) => fs::read_to_string(path)
+                Data::Path(path) => crate::graphics::file::read_to_string(path)
                     .ok()
                     .and_then(|contents| usvg::Tree::from_str(&contents, &options).ok()),
                 Data::Bytes(bytes) => usvg::Tree::from_data(bytes, &options).ok(),

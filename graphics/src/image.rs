@@ -197,6 +197,9 @@ pub fn load(handle: &image::Handle) -> Result<Buffer, image::Error> {
 
     let (width, height, pixels) = match handle {
         image::Handle::Path(_, path) => {
+            crate::file::regular(path)
+                .map_err(|error| image::Error::Inaccessible(std::sync::Arc::new(error)))?;
+
             let image = open_image(path).map_err(to_error)?;
 
             let operation = std::fs::File::open(path)
