@@ -16,6 +16,9 @@ pub struct Responsive<'a, Message, Theme = crate::Theme, Renderer = crate::Rende
     width: Length,
     height: Length,
     content: Element<'a, Message, Theme, Renderer>,
+    /// The size `content` was built for. Laid out again at that size, it is kept, with
+    /// whatever its widgets took from the last update.
+    built_for: Option<Size>,
 }
 
 impl<'a, Message, Theme, Renderer> Responsive<'a, Message, Theme, Renderer>
@@ -34,6 +37,7 @@ where
             width: Length::Fill,
             height: Length::Fill,
             content: Element::new(space()),
+            built_for: None,
         }
     }
 
@@ -75,8 +79,11 @@ where
         let limits = limits.width(self.width).height(self.height);
         let size = limits.max();
 
-        self.content = (self.view)(size);
-        tree.diff_children(std::slice::from_ref(&self.content));
+        if self.built_for != Some(size) || tree.children.is_empty() {
+            self.content = (self.view)(size);
+            self.built_for = Some(size);
+            tree.diff_children(std::slice::from_ref(&self.content));
+        }
 
         let node =
             self.content
