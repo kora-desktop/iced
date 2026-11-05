@@ -37,4 +37,9 @@ pub struct PlatformSpecific {
     /// on X11 and on compositors without the global; ask
     /// `window::is_halo_header_overlay` which one the window got.
     pub halo_header_overlay: bool,
+
+    /// Wayland-only: mark the window modal to its parent (`xdg_wm_dialog_v1`), so
+    /// the compositor keeps the parent's focus and input on it until it closes.
+    /// Ignored on X11 and on compositors without the global.
+    pub wayland_modal: bool,
 }

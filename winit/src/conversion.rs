@@ -148,6 +148,10 @@ pub fn window_attributes(
             if settings.platform_specific.halo_header_overlay {
                 attributes = attributes.with_halo_header_overlay(true);
             }
+
+            if settings.platform_specific.wayland_modal {
+                attributes = attributes.with_wayland_modal(true);
+            }
         }
     }
 
