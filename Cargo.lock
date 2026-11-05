@@ -1471,7 +1471,7 @@ dependencies = [
 [[package]]
 name = "dpi"
 version = "0.1.1"
-source = "git+https://github.com/playtron-os/winit.git?rev=1fbd6e419696dca7f8743f5f4f17b8583b4a199a#1fbd6e419696dca7f8743f5f4f17b8583b4a199a"
+source = "git+https://github.com/playtron-os/winit.git?rev=c7f4d0a9bfe0a87249c1cc5672010ca297489379#c7f4d0a9bfe0a87249c1cc5672010ca297489379"
 
 [[package]]
 name = "dtor"
@@ -7953,7 +7953,7 @@ checksum = "d6bbff5f0aada427a1e5a6da5f1f98158182f26556f345ac9e04d36d0ebed650"
 [[package]]
 name = "winit"
 version = "0.30.12"
-source = "git+https://github.com/playtron-os/winit.git?rev=1fbd6e419696dca7f8743f5f4f17b8583b4a199a#1fbd6e419696dca7f8743f5f4f17b8583b4a199a"
+source = "git+https://github.com/playtron-os/winit.git?rev=c7f4d0a9bfe0a87249c1cc5672010ca297489379#c7f4d0a9bfe0a87249c1cc5672010ca297489379"
 dependencies = [
  "ahash",
  "android-activity",
