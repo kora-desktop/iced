@@ -3,11 +3,11 @@
 //!
 //! Its own test binary: the text system is built once per process.
 use iced_test::core::renderer::Headless;
-use iced_test::core::text::{Paragraph as _, Renderer as _, Span, Text};
 use iced_test::core::text::{Alignment, Ellipsis, LineHeight, Shaping, Wrapping};
+use iced_test::core::text::{Paragraph as _, Renderer as _, Span, Text};
 use iced_test::core::{Color, Font, Pixels, Point, Rectangle, Renderer as _, Size, alignment};
-use iced_test::renderer::graphics::text;
 use iced_test::renderer::Renderer;
+use iced_test::renderer::graphics::text;
 
 const SIZE: u32 = 120;
 
@@ -20,8 +20,12 @@ fn peak_alpha(backend: &str, span: Color, fill: Color) -> u8 {
     );
 
     let font = Font::with_name("Fira Sans");
-    let mut renderer = block_on(<Renderer as Headless>::new(font, Pixels(16.0), Some(backend)))
-        .unwrap_or_else(|| panic!("the {backend} renderer is available"));
+    let mut renderer = block_on(<Renderer as Headless>::new(
+        font,
+        Pixels(16.0),
+        Some(backend),
+    ))
+    .unwrap_or_else(|| panic!("the {backend} renderer is available"));
 
     assert_eq!(renderer.name(), backend, "asked for {backend}");
 
@@ -46,7 +50,12 @@ fn peak_alpha(backend: &str, span: Color, fill: Color) -> u8 {
     renderer.fill_paragraph(&paragraph, Point::ORIGIN, fill, bounds);
 
     let rgba = renderer.screenshot(Size::new(SIZE, SIZE), 1.0, Color::TRANSPARENT);
-    rgba.chunks_exact(4).map(|pixel| pixel[3]).max().unwrap()
+    rgba.as_chunks::<4>()
+        .0
+        .iter()
+        .map(|pixel| pixel[3])
+        .max()
+        .unwrap()
 }
 
 fn block_on<T>(future: impl std::future::Future<Output = T>) -> T {

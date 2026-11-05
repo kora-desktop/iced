@@ -241,8 +241,12 @@ fn draw(
                     tiny_skia::PixmapRef::from_bytes(buffer, placement.width, placement.height)
                         .expect("Create glyph pixel map");
 
-                let opacity =
-                    color.a * glyph.color_opt.map(|c| c.a() as f32 / 255.0).unwrap_or(1.0);
+                // A span's own colour replaces the paragraph's, alpha included, as in
+                // wgpu; only glyphs without one take the paragraph colour's alpha.
+                let opacity = glyph
+                    .color_opt
+                    .map(|c| c.a() as f32 / 255.0)
+                    .unwrap_or(color.a);
 
                 pixels.draw_pixmap(
                     physical_glyph.x + placement.left,
