@@ -33,6 +33,10 @@ struct Internal {
     scale: Option<f32>,
     letter_spacing: Option<f32>,
     selection: Option<Selection>,
+    /// Where each buffer line starts in the text, in bytes. A buffer line
+    /// counts its glyphs from its own start; a hit or a selection range
+    /// counts across the whole text.
+    line_starts: Vec<usize>,
 }
 
 #[derive(Clone)]
@@ -158,6 +162,8 @@ impl core::text::Paragraph for Paragraph {
                 || natural_min_bounds.height >= text.bounds.height
                 || natural_min_bounds != min_bounds);
 
+        let line_starts = plain_line_starts(&buffer);
+
         Self(Arc::new(Internal {
             buffer,
             hint,
@@ -175,6 +181,7 @@ impl core::text::Paragraph for Paragraph {
             version: font_system.version(),
             letter_spacing: text.letter_spacing,
             selection: None,
+            line_starts,
         }))
     }
 
@@ -295,6 +302,7 @@ impl core::text::Paragraph for Paragraph {
             version: font_system.version(),
             letter_spacing: text.letter_spacing,
             selection: None,
+            line_starts: rich_line_starts(text.content),
         }))
     }
 
@@ -559,12 +567,14 @@ impl core::text::Paragraph for Paragraph {
     }
 
     fn hit_test(&self, point: Point) -> Option<Hit> {
-        let cursor = self
-            .internal()
+        let internal = self.internal();
+        let cursor = internal
             .buffer
             .hit(point.x * self.0.hint_factor, point.y * self.0.hint_factor)?;
 
-        Some(Hit::CharOffset(cursor.index))
+        Some(Hit::CharOffset(
+            internal.line_start(cursor.line) + cursor.index,
+        ))
     }
 
     fn hit_span(&self, point: Point) -> Option<usize> {
@@ -663,10 +673,11 @@ impl core::text::Paragraph for Paragraph {
         for run in internal.buffer.layout_runs() {
             let line_top = run.line_top;
             let line_height = run.line_height;
+            let line_start = internal.line_start(run.line_i);
 
             // Track character position within this run
-            let run_start = run.glyphs.first().map(|g| g.start).unwrap_or(0);
-            let run_end = run.glyphs.last().map(|g| g.end).unwrap_or(0);
+            let run_start = run.glyphs.first().map(|g| g.start).unwrap_or(0) + line_start;
+            let run_end = run.glyphs.last().map(|g| g.end).unwrap_or(0) + line_start;
 
             // Skip runs that don't overlap with selection
             if run_end <= start || run_start >= end {
@@ -675,7 +686,7 @@ impl core::text::Paragraph for Paragraph {
 
             for glyph in run.glyphs.iter() {
                 // Check if this glyph overlaps with selection
-                if glyph.end <= start || glyph.start >= end {
+                if line_start + glyph.end <= start || line_start + glyph.start >= end {
                     continue;
                 }
 
@@ -769,6 +780,39 @@ impl fmt::Debug for Paragraph {
     }
 }
 
+impl Internal {
+    fn line_start(&self, line: usize) -> usize {
+        self.line_starts.get(line).copied().unwrap_or_default()
+    }
+}
+
+/// Where each line of a buffer set from plain text starts: `set_text` keeps
+/// every line's own ending.
+fn plain_line_starts(buffer: &cosmic_text::Buffer) -> Vec<usize> {
+    let mut start = 0;
+
+    buffer
+        .lines
+        .iter()
+        .map(|line| {
+            let at = start;
+            start += line.text().len() + line.ending().as_str().len();
+            at
+        })
+        .collect()
+}
+
+/// Where each line of a buffer set from spans starts: `set_rich_text` splits
+/// the joined spans into paragraphs and keeps no line endings.
+fn rich_line_starts<Link>(spans: &[Span<'_, Link>]) -> Vec<usize> {
+    let text: String = spans.iter().map(|span| span.text.as_ref()).collect();
+    let base = text.as_ptr() as usize;
+
+    cosmic_text::BidiParagraphs::new(&text)
+        .map(|line| line.as_ptr() as usize - base)
+        .collect()
+}
+
 impl PartialEq for Internal {
     fn eq(&self, other: &Self) -> bool {
         self.font == other.font
@@ -804,6 +848,7 @@ impl Default for Internal {
             scale: None,
             letter_spacing: None,
             selection: None,
+            line_starts: Vec::new(),
         }
     }
 }

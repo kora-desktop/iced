@@ -62,6 +62,8 @@ pub trait Paragraph: Sized + Default {
 
     /// Tests whether the provided point is within the boundaries of the
     /// [`Paragraph`], returning information about the nearest character.
+    ///
+    /// Its offset is in bytes from the start of the whole text, across lines.
     fn hit_test(&self, point: Point) -> Option<Hit>;
 
     /// Tests whether the provided point is within the boundaries of a
@@ -73,7 +75,8 @@ pub trait Paragraph: Sized + Default {
     /// A [`Span`] can have multiple bounds for each line it's on.
     fn span_bounds(&self, index: usize) -> Vec<Rectangle>;
 
-    /// Returns the visual bounds for a character range selection.
+    /// Returns the visual bounds for a character range selection, in bytes
+    /// from the start of the whole text as [`Paragraph::hit_test`] counts them.
     /// Returns multiple rectangles if the selection spans multiple lines.
     fn selection_bounds(&self, start: usize, end: usize) -> Vec<Rectangle>;
 
