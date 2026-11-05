@@ -14,7 +14,7 @@
 #![cfg(not(feature = "wgpu"))]
 use iced_test::Simulator;
 use iced_widget::core::text::{LineHeight, Span};
-use iced_widget::core::{Color, Element, Event, Point, Settings, Theme, mouse};
+use iced_widget::core::{Color, Element, Event, Length, Point, Settings, Theme, mouse};
 use iced_widget::{rich_text, span};
 
 type Renderer = iced_renderer::Renderer;
@@ -40,6 +40,7 @@ enum Message {
 fn text<'a>(selection: Option<(usize, usize)>) -> Ui<'a> {
     let spans: [Span<'a, ()>; 1] = [span(TEXT)];
     let text: Element<'a, Message, Theme, Renderer> = rich_text(spans)
+        .width(Length::Fill)
         .line_height(LineHeight::Absolute(LINE.into()))
         .selection(selection)
         .selection_color(MARK)
