@@ -358,6 +358,12 @@ pub fn present(
     background_color: Color,
     on_pre_present: impl FnOnce(),
 ) -> Result<(), compositor::SurfaceError> {
+    let health = std::sync::Arc::clone(renderer.health());
+    health.exit_if_lost();
+
+    let out_of_memory = health.out_of_memory_count();
+    let ran_out = || health.out_of_memory_count() != out_of_memory;
+
     // Wrap the entire present flow in catch_unwind to handle Wayland
     // broken pipe panics (EPIPE / os error 32) that surface operations
     // can trigger during rapid maximize/unmaximize transitions.
@@ -377,6 +383,12 @@ pub fn present(
                     viewport,
                 );
 
+                // Part of this frame failed to allocate. Dropping it unpresented
+                // keeps the last good frame on screen.
+                if ran_out() {
+                    return Err(compositor::SurfaceError::OutOfMemory);
+                }
+
                 // Present the frame
                 on_pre_present();
                 frame.present();
@@ -392,6 +404,14 @@ pub fn present(
             },
         }
     }));
+
+    health.exit_if_lost();
+
+    // Also catches an acquire that ran out, which wgpu then reports as `Other`.
+    if ran_out() {
+        renderer.release_memory();
+        return Err(compositor::SurfaceError::OutOfMemory);
+    }
 
     match result {
         Ok(inner) => inner,

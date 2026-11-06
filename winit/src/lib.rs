@@ -1956,8 +1956,13 @@ async fn run_instance<P>(
                             }
                             Err(error) => match error {
                                 compositor::SurfaceError::OutOfMemory => {
-                                    // This is an unrecoverable error.
-                                    panic!("{error:?}");
+                                    present_span.finish();
+
+                                    // The renderer dropped the frame and freed what it
+                                    // could. Try again shortly rather than every frame.
+                                    window.request_redraw(crate::core::window::RedrawRequest::At(
+                                        Instant::now() + Duration::from_millis(100),
+                                    ));
                                 }
                                 compositor::SurfaceError::Timeout => {
                                     present_span.finish();
