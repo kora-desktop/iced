@@ -270,3 +270,48 @@ fn a_secure_field_never_tells_its_text() {
         InputMethod::Disabled => panic!("a focused field enables the input method"),
     }
 }
+
+/// Ctrl+K belongs to the shell's command palette, so a focused field lets it
+/// through to the window rather than swallowing it.
+#[test]
+fn a_focused_field_leaves_ctrl_k_to_the_window() {
+    let mut input = TextInput::new("", "hello").on_input(|_| ());
+    let mut tree = focused(&input, 2);
+    let bounds = Rectangle::with_size(Size::new(300.0, 50.0));
+    let node = input.layout(
+        &mut tree,
+        &(),
+        &layout::Limits::new(Size::ZERO, bounds.size()),
+        None,
+    );
+    let modifiers = keyboard::Modifiers::COMMAND;
+    let mut messages = Vec::new();
+    for (event, captured) in [
+        (keyboard::Event::ModifiersChanged(modifiers), false),
+        (
+            keyboard::Event::KeyPressed {
+                key: keyboard::Key::Character("k".into()),
+                modified_key: keyboard::Key::Character("k".into()),
+                physical_key: keyboard::key::Physical::Code(keyboard::key::Code::KeyK),
+                location: keyboard::Location::Standard,
+                modifiers,
+                text: Some("\u{b}".into()),
+                repeat: false,
+            },
+            false,
+        ),
+    ] {
+        let mut shell = Shell::new(&mut messages);
+        input.update(
+            &mut tree,
+            &Event::Keyboard(event),
+            Layout::new(&node),
+            mouse::Cursor::Unavailable,
+            &(),
+            &mut shell,
+            &bounds,
+        );
+        assert_eq!(shell.is_event_captured(), captured);
+    }
+    assert!(messages.is_empty(), "Ctrl+K types nothing");
+}

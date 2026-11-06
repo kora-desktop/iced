@@ -2292,6 +2292,11 @@ async fn run_instance<P>(
                             }
 
                             for (event, status) in window_events.into_iter().zip(statuses) {
+                                if status == crate::core::event::Status::Ignored
+                                    && is_palette_shortcut(&event)
+                                {
+                                    request_app_palette(&window.raw);
+                                }
                                 runtime.broadcast(subscription::Event::Interaction {
                                     window: id,
                                     event,
@@ -4246,10 +4251,90 @@ fn run_clipboard<Message: Send>(
     }
 }
 
+/// Ctrl+K (Cmd+K on macOS), the shell's command palette shortcut, by the key's
+/// Latin letter so other layouts reach it too.
+fn is_palette_shortcut(event: &crate::core::Event) -> bool {
+    let crate::core::Event::Keyboard(crate::core::keyboard::Event::KeyPressed {
+        key,
+        physical_key,
+        modifiers,
+        ..
+    }) = event
+    else {
+        return false;
+    };
+    modifiers.command()
+        && !modifiers.shift()
+        && !modifiers.alt()
+        && key.to_latin(*physical_key) == Some('k')
+}
+
+/// A shortcut no widget took asks the shell for the window's palette, so it
+/// works from a text field and in apps that never bind it.
+fn request_app_palette(window: &winit::window::Window) {
+    #[cfg(all(
+        feature = "wayland",
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+        )
+    ))]
+    {
+        use winit::platform::wayland::WindowExtWayland;
+        window.request_app_palette();
+    }
+    #[cfg(not(all(
+        feature = "wayland",
+        any(
+            target_os = "linux",
+            target_os = "dragonfly",
+            target_os = "freebsd",
+            target_os = "netbsd",
+            target_os = "openbsd",
+        )
+    )))]
+    {
+        let _ = window;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use std::sync::atomic::{AtomicBool, Ordering};
+
+    fn key_press(key: &str, modifiers: crate::core::keyboard::Modifiers) -> crate::core::Event {
+        use crate::core::keyboard::{Key, Location, key};
+        crate::core::Event::Keyboard(crate::core::keyboard::Event::KeyPressed {
+            key: Key::Character(key.into()),
+            modified_key: Key::Character(key.into()),
+            physical_key: key::Physical::Code(key::Code::KeyK),
+            location: Location::Standard,
+            modifiers,
+            text: None,
+            repeat: false,
+        })
+    }
+
+    #[test]
+    fn only_a_plain_command_k_is_the_palette_shortcut() {
+        use crate::core::keyboard::Modifiers;
+        assert!(is_palette_shortcut(&key_press("k", Modifiers::COMMAND)));
+        // The key's Latin letter decides, as on a Cyrillic layout.
+        assert!(is_palette_shortcut(&key_press("л", Modifiers::COMMAND)));
+        assert!(!is_palette_shortcut(&key_press("k", Modifiers::empty())));
+        assert!(!is_palette_shortcut(&key_press(
+            "k",
+            Modifiers::COMMAND | Modifiers::SHIFT
+        )));
+        assert!(!is_palette_shortcut(&key_press(
+            "k",
+            Modifiers::COMMAND | Modifiers::ALT
+        )));
+    }
 
     /// Stands in for a window's GPU surface: records when it is released.
     struct Surface(Arc<AtomicBool>);
