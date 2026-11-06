@@ -3,6 +3,7 @@ use crate::cached_draw;
 use crate::cached_scale;
 use crate::gradient_fade;
 use crate::graphics::{Antialiasing, Shell};
+use crate::health::Health;
 use crate::primitive;
 use crate::quad;
 use crate::text;
@@ -26,6 +27,7 @@ pub struct Engine {
     pub(crate) cached_draw_pipeline: cached_draw::Pipeline,
     pub(crate) blur_pipeline: blur::Pipeline,
     pub(crate) primitive_storage: Arc<RwLock<primitive::Storage>>,
+    pub(crate) health: Arc<Health>,
     _shell: Shell,
 }
 
@@ -38,6 +40,8 @@ impl Engine {
         antialiasing: Option<Antialiasing>, // TODO: Initialize AA pipelines lazily
         shell: Shell,
     ) -> Self {
+        let health = Health::watch(&device);
+
         Self {
             format,
 
@@ -57,6 +61,7 @@ impl Engine {
             cached_draw_pipeline: cached_draw::Pipeline::new(&device, format),
             blur_pipeline: blur::Pipeline::new(&device, format),
             primitive_storage: Arc::new(RwLock::new(primitive::Storage::default())),
+            health,
 
             device,
             queue,
@@ -68,6 +73,11 @@ impl Engine {
     pub fn create_image_cache(&self) -> crate::image::Cache {
         self.image_pipeline
             .create_cache(&self.device, &self.queue, &self._shell)
+    }
+
+    /// The errors and loss of this engine's device.
+    pub fn health(&self) -> &Arc<Health> {
+        &self.health
     }
 
     pub fn trim(&mut self) {

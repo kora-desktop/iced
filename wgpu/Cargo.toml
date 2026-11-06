@@ -86,3 +86,5 @@ x11rb = { version = "0.13", features = [
 
 [dev-dependencies]
 futures = { workspace = true, features = ["executor"] }
+# The noop backend gives tests a device without a GPU.
+wgpu = { workspace = true, features = ["noop"] }

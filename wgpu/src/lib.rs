@@ -26,6 +26,7 @@ pub mod blur;
 pub mod cached_draw;
 pub mod cached_scale;
 pub mod gradient_fade;
+pub mod health;
 pub mod layer;
 pub mod primitive;
 pub mod settings;
@@ -53,6 +54,8 @@ mod image;
 #[cfg(test)]
 mod blur_tests;
 #[cfg(test)]
+mod health_tests;
+#[cfg(test)]
 mod mesh_tests;
 #[cfg(test)]
 mod opacity_tests;
@@ -66,6 +69,7 @@ pub use iced_graphics::core;
 pub use wgpu;
 
 pub use engine::Engine;
+pub use health::Health;
 pub use layer::Layer;
 pub use primitive::Primitive;
 pub use settings::Settings;
@@ -218,6 +222,26 @@ impl Renderer {
 
             engine,
         }
+    }
+
+    /// The errors and loss of this renderer's device.
+    pub fn health(&self) -> &std::sync::Arc<Health> {
+        self.engine.health()
+    }
+
+    /// Frees the GPU memory kept between frames for effects, after the device ran out.
+    ///
+    /// Blur and opacity group textures and upload chunks are allocated again by
+    /// the frames that need them.
+    pub fn release_memory(&mut self) {
+        self.blur_cache = blur::TextureCache::new();
+        self.group_pool = group::Pool::default();
+        self.staging_belt =
+            wgpu::util::StagingBelt::new(self.engine.device.clone(), buffer::MAX_WRITE_SIZE as u64);
+        self.engine.trim();
+
+        #[cfg(any(feature = "svg", feature = "image"))]
+        self.image_cache.borrow_mut().trim();
     }
 
     /// Scales each primitive of a group that held a backdrop and so could not
@@ -3166,6 +3190,7 @@ impl renderer::Headless for Renderer {
             Some(graphics::Antialiasing::MSAAx4),
             Shell::headless(),
         );
+        engine.health().panic_on_errors();
 
         Some(Self::new(engine, default_font, default_text_size))
     }
