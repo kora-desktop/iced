@@ -392,13 +392,21 @@ impl Engine {
                 letter_spacing,
                 clip_bounds: local_clip_bounds,
             } => {
-                let physical_bounds = *local_clip_bounds * transformation;
-
-                if !clip_bounds.intersects(&physical_bounds) {
+                let Some(clip_bounds) =
+                    clip_bounds.intersection(&(*local_clip_bounds * transformation))
+                else {
                     return;
-                }
+                };
 
-                let clip_mask = match physical_bounds.is_within(&clip_bounds) {
+                // Alignment moves the text off `bounds`' corner by up to its size either way.
+                let drawn = Rectangle {
+                    x: bounds.x - bounds.width,
+                    y: bounds.y - bounds.height,
+                    width: bounds.width * 2.0,
+                    height: bounds.height * 2.0,
+                } * transformation;
+
+                let clip_mask = match drawn.is_within(&clip_bounds) {
                     true => None,
                     false => {
                         adjust_clip_mask(clip_mask, clip_bounds);
