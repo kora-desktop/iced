@@ -59,6 +59,8 @@ mod health_tests;
 mod mesh_tests;
 #[cfg(test)]
 mod opacity_tests;
+#[cfg(test)]
+mod text_clip_tests;
 
 use buffer::Buffer;
 

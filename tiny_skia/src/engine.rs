@@ -392,18 +392,22 @@ impl Engine {
                 letter_spacing,
                 clip_bounds: local_clip_bounds,
             } => {
-                let physical_bounds = *local_clip_bounds * transformation;
-
-                if !clip_bounds.intersects(&physical_bounds) {
+                let Some(clip_bounds) =
+                    clip_bounds.intersection(&(*local_clip_bounds * transformation))
+                else {
                     return;
-                }
+                };
 
-                let clip_mask = match physical_bounds.is_within(&clip_bounds) {
-                    true => None,
-                    false => {
-                        adjust_clip_mask(clip_mask, clip_bounds);
-                        Some(clip_mask as &_)
+                // The text's area is known only once it is laid out, so the mask is set then.
+                let clip_mask = move |drawn: Rectangle| {
+                    let clip_mask = clip_mask;
+
+                    if drawn.is_within(&clip_bounds) {
+                        return None;
                     }
+
+                    adjust_clip_mask(clip_mask, clip_bounds);
+                    Some(&*clip_mask)
                 };
 
                 self.text_pipeline.draw_cached(

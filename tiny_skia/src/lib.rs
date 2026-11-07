@@ -791,3 +791,7 @@ impl renderer::Headless for Renderer {
 #[cfg(test)]
 #[path = "opacity_tests.rs"]
 mod opacity_tests;
+
+#[cfg(test)]
+#[path = "text_clip_tests.rs"]
+mod text_clip_tests;

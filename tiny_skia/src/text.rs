@@ -92,7 +92,7 @@ impl Pipeline {
         );
     }
 
-    pub fn draw_cached(
+    pub fn draw_cached<'a>(
         &mut self,
         content: &str,
         bounds: Rectangle,
@@ -107,7 +107,7 @@ impl Pipeline {
         ellipsis: Ellipsis,
         letter_spacing: Option<f32>,
         pixels: &mut tiny_skia::PixmapMut<'_>,
-        clip_mask: Option<&tiny_skia::Mask>,
+        clip_mask: impl FnOnce(Rectangle) -> Option<&'a tiny_skia::Mask>,
         transformation: Transformation,
     ) {
         let line_height = f32::from(line_height);
@@ -144,6 +144,9 @@ impl Pipeline {
             alignment::Vertical::Center => bounds.y - height / 2.0,
             alignment::Vertical::Bottom => bounds.y - height,
         };
+
+        let clip_mask =
+            clip_mask(Rectangle::new(Point::new(x, y), entry.min_bounds) * transformation);
 
         draw(
             font_system,
