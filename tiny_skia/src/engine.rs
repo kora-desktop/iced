@@ -398,20 +398,16 @@ impl Engine {
                     return;
                 };
 
-                // Alignment moves the text off `bounds`' corner by up to its size either way.
-                let drawn = Rectangle {
-                    x: bounds.x - bounds.width,
-                    y: bounds.y - bounds.height,
-                    width: bounds.width * 2.0,
-                    height: bounds.height * 2.0,
-                } * transformation;
+                // The text's area is known only once it is laid out, so the mask is set then.
+                let clip_mask = move |drawn: Rectangle| {
+                    let clip_mask = clip_mask;
 
-                let clip_mask = match drawn.is_within(&clip_bounds) {
-                    true => None,
-                    false => {
-                        adjust_clip_mask(clip_mask, clip_bounds);
-                        Some(clip_mask as &_)
+                    if drawn.is_within(&clip_bounds) {
+                        return None;
                     }
+
+                    adjust_clip_mask(clip_mask, clip_bounds);
+                    Some(&*clip_mask)
                 };
 
                 self.text_pipeline.draw_cached(
