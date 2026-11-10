@@ -1,5 +1,6 @@
 //! A mouse wheel notch eases a scrollable one line down over a few frames,
 //! as a browser does, and further notches add to where it is heading.
+//! A high-resolution wheel's fractions of a notch ease the same way.
 //! Touchpads, which report pixels, scroll at once.
 //!
 //! Skipped with the `wgpu` feature: it builds the renderer without a backend,
@@ -105,6 +106,52 @@ fn another_notch_mid_way_carries_on_to_two_lines() {
         "{offsets:?}"
     );
     assert_eq!(offsets.last(), Some(&(2.0 * SmoothScroll::LINE)));
+}
+
+/// The offsets a wheel draws at 60 Hz from `steps`, each a fraction of a notch
+/// down, one every `every` ms.
+fn wheel(steps: &[f32], every: u64) -> Vec<f32> {
+    let mut ui = simulator(true);
+    SmoothScroll::set_instant(false);
+
+    let start = Instant::now();
+    let mut drawn = 0;
+    for (i, lines) in (0..).zip(steps) {
+        let at = Duration::from_millis(every) * i;
+        while Duration::from_millis(16) * drawn < at {
+            drawn += 1;
+            frame(&mut ui, start + Duration::from_millis(16) * drawn);
+        }
+        notch(&mut ui, *lines);
+    }
+    frames(&mut ui, start + Duration::from_millis(16) * drawn, 30);
+
+    offsets(ui)
+}
+
+fn largest_step(offsets: &[f32]) -> f32 {
+    offsets
+        .windows(2)
+        .map(|pair| pair[1] - pair[0])
+        .fold(0.0, f32::max)
+}
+
+#[test]
+fn a_high_resolution_wheel_eases_like_whole_notches() {
+    // Two notches 64 ms apart, from a classic wheel and from one that reports
+    // eighths of a notch every 8 ms.
+    let classic = wheel(&[1.0, 1.0], 64);
+    let high_resolution = wheel(&[0.125; 16], 8);
+
+    assert!(
+        high_resolution.windows(2).all(|pair| pair[0] < pair[1]),
+        "{high_resolution:?}"
+    );
+    assert_eq!(high_resolution.last(), Some(&(2.0 * SmoothScroll::LINE)));
+    assert!(
+        largest_step(&high_resolution) <= largest_step(&classic),
+        "no jumpier than {classic:?}: {high_resolution:?}"
+    );
 }
 
 #[test]
