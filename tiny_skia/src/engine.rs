@@ -1245,10 +1245,12 @@ pub fn adjust_clip_mask(clip_mask: &mut tiny_skia::Mask, bounds: Rectangle) {
 /// clipped to the rounded corners (like CSS `overflow: hidden` on a rounded box).
 ///
 /// `radius` is in the same physical-pixel space as `bounds`.
+/// Only the part `within` is kept: a partial redraw paints its damage and nothing past it.
 pub fn adjust_clip_mask_rounded(
     clip_mask: &mut tiny_skia::Mask,
     bounds: Rectangle,
     radius: crate::core::border::Radius,
+    within: Rectangle,
 ) {
     clip_mask.clear();
 
@@ -1266,6 +1268,17 @@ pub fn adjust_clip_mask_rounded(
         true,
         tiny_skia::Transform::default(),
     );
+
+    if let Some(within) =
+        tiny_skia::Rect::from_xywh(within.x, within.y, within.width, within.height)
+    {
+        clip_mask.intersect_path(
+            &tiny_skia::PathBuilder::from_rect(within),
+            tiny_skia::FillRule::EvenOdd,
+            false,
+            tiny_skia::Transform::default(),
+        );
+    }
 }
 
 #[cfg(test)]
