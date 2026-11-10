@@ -204,6 +204,9 @@ pub fn window_event(
                 }))
             }
             winit::event::MouseScrollDelta::PixelDelta(position) => {
+                // winit reports physical pixels; widgets scroll in logical ones.
+                let position = position.to_logical::<f64>(f64::from(scale_factor));
+
                 Some(Event::Mouse(mouse::Event::WheelScrolled {
                     delta: mouse::ScrollDelta::Pixels {
                         x: position.x as f32,

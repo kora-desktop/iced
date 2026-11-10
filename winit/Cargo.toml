@@ -59,3 +59,8 @@ wasm-bindgen-futures.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 mundy.workspace = true
 mundy.optional = true
+
+[dev-dependencies]
+iced_renderer.workspace = true
+iced_test.workspace = true
+iced_widget.workspace = true
