@@ -36,6 +36,7 @@ where
     width: f32,
     padding: Padding,
     container_padding: Padding,
+    edge_margin: f32,
     text_size: Option<Pixels>,
     letter_spacing: Option<Pixels>,
     line_height: text::LineHeight,
@@ -77,6 +78,7 @@ where
             width: 0.0,
             padding: Padding::ZERO,
             container_padding: Padding::ZERO,
+            edge_margin: 0.0,
             text_size: None,
             letter_spacing: None,
             line_height: text::LineHeight::default(),
@@ -106,6 +108,13 @@ where
     /// menu's border and the option list (the options still scroll within it).
     pub fn container_padding<P: Into<Padding>>(mut self, padding: P) -> Self {
         self.container_padding = padding.into();
+        self
+    }
+
+    /// Sets the space the [`Menu`] keeps from the window's top and bottom
+    /// edges. A list too long for the room left shrinks and scrolls instead.
+    pub fn edge_margin(mut self, margin: f32) -> Self {
+        self.edge_margin = margin.max(0.0);
         self
     }
 
@@ -255,6 +264,7 @@ where
     row: Row,
     width: f32,
     container_padding: Padding,
+    edge_margin: f32,
     target_height: f32,
     class: &'a <Theme as Catalog>::Class<'b>,
 }
@@ -286,6 +296,7 @@ where
             width,
             padding,
             container_padding,
+            edge_margin,
             font,
             text_size,
             letter_spacing,
@@ -346,6 +357,7 @@ where
             row,
             width,
             container_padding,
+            edge_margin,
             target_height,
             class,
         }
@@ -436,15 +448,12 @@ where
     Renderer: text::Renderer,
 {
     fn layout(&mut self, renderer: &Renderer, bounds: Size) -> layout::Node {
-        let space_below = bounds.height - (self.position.y + self.target_height);
-        let space_above = self.position.y;
+        let margin = self.edge_margin;
+        let space_below = bounds.height - margin - (self.position.y + self.target_height);
+        let space_above = self.position.y - margin;
 
         let pad = self.container_padding;
-        let available = if space_below > space_above {
-            space_below
-        } else {
-            space_above
-        };
+        let available = space_below.max(space_above).max(0.0);
 
         // Reserve room for the container padding; the scrollable list is laid
         // out inside it and inset by `pad`.
