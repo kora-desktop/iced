@@ -78,14 +78,22 @@ where
             load_font(font).expect("Font must be valid");
         }
 
+        // A GPU draws a little differently on every machine, so a snapshot draws on
+        // tiny-skia, where the renderer has it, unless `ICED_TEST_BACKEND` names one.
         let mut renderer = {
             let backend = env::var("ICED_TEST_BACKEND").ok();
+            let text_size = settings.default_text_size;
 
-            crate::futures::futures::executor::block_on(Renderer::new(
-                default_font,
-                settings.default_text_size,
-                backend.as_deref(),
-            ))
+            crate::futures::futures::executor::block_on(async {
+                if backend.is_some() {
+                    return Renderer::new(default_font, text_size, backend.as_deref()).await;
+                }
+
+                match Renderer::new(default_font, text_size, Some("tiny-skia")).await {
+                    Some(renderer) => Some(renderer),
+                    None => Renderer::new(default_font, text_size, None).await,
+                }
+            })
             .expect("Create new headless renderer")
         };
 
