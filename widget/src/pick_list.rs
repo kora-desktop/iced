@@ -168,6 +168,7 @@ where
     width: Length,
     padding: Padding,
     menu_padding: Padding,
+    menu_edge_margin: f32,
     text_size: Option<Pixels>,
     letter_spacing: Option<Pixels>,
     line_height: text::LineHeight,
@@ -213,6 +214,7 @@ where
             width: Length::Shrink,
             padding: crate::button::DEFAULT_PADDING,
             menu_padding: Padding::ZERO,
+            menu_edge_margin: 0.0,
             text_size: None,
             letter_spacing: None,
             line_height: text::LineHeight::default(),
@@ -322,6 +324,13 @@ where
     /// between the menu border and the option list.
     pub fn menu_padding<P: Into<Padding>>(mut self, padding: P) -> Self {
         self.menu_padding = padding.into();
+        self
+    }
+
+    /// Sets the space the [`PickList`]'s menu keeps from the window's top and
+    /// bottom edges. A list too long for the room left shrinks and scrolls.
+    pub fn menu_edge_margin(mut self, margin: f32) -> Self {
+        self.menu_edge_margin = margin;
         self
     }
 
@@ -747,8 +756,10 @@ where
                 // halves of one shape squared opposite edges.
                 let opens_upward = state.menu.opens_upward().unwrap_or_else(|| {
                     let bounds = layout.bounds();
-                    let space_below = (viewport.y + viewport.height) - (bounds.y + bounds.height);
-                    let space_above = bounds.y - viewport.y;
+                    let margin = self.menu_edge_margin;
+                    let space_below =
+                        (viewport.y + viewport.height - margin) - (bounds.y + bounds.height);
+                    let space_above = bounds.y - viewport.y - margin;
 
                     space_above > space_below
                 });
@@ -1042,6 +1053,7 @@ where
             .width(bounds.width)
             .padding(self.padding)
             .container_padding(self.menu_padding)
+            .edge_margin(self.menu_edge_margin)
             .font(font)
             .ellipsis(self.ellipsis)
             .shaping(self.shaping)
