@@ -243,15 +243,15 @@ fn draw_layer(
     // A rounded clip layer trims its corners; its quads must always
     // consult the mask (the rect `is_within` shortcut would skip it).
     // Build the mask from the *full* bounds so the corners land in the
-    // right place, cut to the damaged `layer_bounds`: a quad reaching past
-    // the damage would cover what this redraw leaves as it was.
+    // right place, cut to the area this redraw cleared: a quad reaching past
+    // the damage would cover what the redraw leaves as it was.
     let rounded_clip = layer.bounds_radius;
     if let Some(radius) = rounded_clip {
         engine::adjust_clip_mask_rounded(
             clip_mask,
             physical_bounds,
             radius * scale_factor,
-            layer_bounds,
+            damage_bounds,
         );
     } else {
         engine::adjust_clip_mask(clip_mask, layer_bounds);

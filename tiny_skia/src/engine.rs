@@ -1245,7 +1245,8 @@ pub fn adjust_clip_mask(clip_mask: &mut tiny_skia::Mask, bounds: Rectangle) {
 /// clipped to the rounded corners (like CSS `overflow: hidden` on a rounded box).
 ///
 /// `radius` is in the same physical-pixel space as `bounds`.
-/// Only the part `within` is kept: a partial redraw paints its damage and nothing past it.
+/// Only the part `within` is kept, cut as the damage is cleared: a partial redraw
+/// paints its damage and nothing past it.
 pub fn adjust_clip_mask_rounded(
     clip_mask: &mut tiny_skia::Mask,
     bounds: Rectangle,
