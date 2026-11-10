@@ -447,7 +447,7 @@ pub fn align(
 
 /// Returns the attributes of the given [`Font`].
 pub fn to_attributes(font: Font) -> cosmic_text::Attrs<'static> {
-    let attributes = cosmic_text::Attrs::new()
+    let attributes = unhinted(cosmic_text::Attrs::new())
         .family(to_family(font.family))
         .weight(to_weight(font.weight))
         .stretch(to_stretch(font.stretch))
@@ -463,6 +463,14 @@ pub fn to_attributes(font: Font) -> cosmic_text::Attrs<'static> {
     }
 
     attributes.font_features(features)
+}
+
+/// Returns `attributes` drawn as the font's outlines, without its hinting program.
+///
+/// Geist's program raises the x-height to a whole pixel and scales each glyph with
+/// it: at 21px, 7% taller and no wider.
+pub fn unhinted(attributes: cosmic_text::Attrs<'_>) -> cosmic_text::Attrs<'_> {
+    attributes.cache_key_flags(cosmic_text::CacheKeyFlags::DISABLE_HINTING)
 }
 
 /// Returns the attributes of the given [`Font`] with optional letter spacing.
