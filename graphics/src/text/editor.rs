@@ -115,7 +115,7 @@ impl editor::Editor for Editor {
         buffer.set_text(
             font_system.raw(),
             text,
-            &cosmic_text::Attrs::new(),
+            &text::unhinted(cosmic_text::Attrs::new()),
             cosmic_text::Shaping::Advanced,
             None,
         );
