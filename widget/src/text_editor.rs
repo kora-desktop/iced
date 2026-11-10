@@ -1367,13 +1367,9 @@ impl<Message> Update<Message> {
                 },
                 mouse::Event::WheelScrolled { delta } if cursor.is_over(bounds) => {
                     Some(Update::Scroll(match delta {
-                        mouse::ScrollDelta::Lines { y, .. } => {
-                            if y.abs() > 0.0 {
-                                y.signum() * -(y.abs() * 4.0).max(1.0)
-                            } else {
-                                0.0
-                            }
-                        }
+                        // A high-resolution wheel sends fractions of a notch;
+                        // `partial_scroll` carries what they add up to.
+                        mouse::ScrollDelta::Lines { y, .. } => -y * 4.0,
                         mouse::ScrollDelta::Pixels { y, .. } => -y / 4.0,
                     }))
                 }
