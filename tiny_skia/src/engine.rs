@@ -601,26 +601,36 @@ impl Engine {
                     return;
                 }
 
-                let clip_mask =
-                    (!physical_bounds.is_within(&_clip_bounds)).then_some(_clip_mask as &_);
-
-                let center = physical_bounds.center();
                 let radians = f32::from(svg.rotation);
-
-                let transform = into_transform(_transformation).post_rotate_at(
-                    radians.to_degrees(),
-                    center.x,
-                    center.y,
+                // A turned image reaches past its bounds at the corners.
+                let (sin, cos) = radians.sin_cos();
+                let reach = Vector::new(
+                    (physical_bounds.width * cos.abs() + physical_bounds.height * sin.abs()
+                        - physical_bounds.width)
+                        / 2.0,
+                    (physical_bounds.width * sin.abs() + physical_bounds.height * cos.abs()
+                        - physical_bounds.height)
+                        / 2.0,
                 );
+                let turned_bounds = Rectangle {
+                    x: physical_bounds.x - reach.x,
+                    y: physical_bounds.y - reach.y,
+                    width: physical_bounds.width + reach.x * 2.0,
+                    height: physical_bounds.height + reach.y * 2.0,
+                };
+
+                let clip_mask =
+                    (!turned_bounds.is_within(&_clip_bounds)).then_some(_clip_mask as &_);
 
                 self.vector_pipeline.draw(
                     &svg.handle,
                     svg.color,
                     *bounds,
                     svg.rasterize_size,
+                    radians,
                     svg.opacity,
                     _pixels,
-                    transform,
+                    into_transform(_transformation),
                     clip_mask,
                 );
             }

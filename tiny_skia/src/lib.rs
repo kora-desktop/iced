@@ -805,3 +805,7 @@ mod opacity_tests;
 #[cfg(test)]
 #[path = "text_clip_tests.rs"]
 mod text_clip_tests;
+
+#[cfg(all(test, feature = "svg"))]
+#[path = "svg_rotation_tests.rs"]
+mod svg_rotation_tests;
