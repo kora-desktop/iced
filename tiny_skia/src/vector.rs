@@ -34,6 +34,7 @@ impl Pipeline {
         color: Option<Color>,
         bounds: Rectangle,
         rasterize_size: Option<Size>,
+        radians: f32,
         opacity: f32,
         pixels: &mut tiny_skia::PixmapMut<'_>,
         transform: Transform,
@@ -57,15 +58,34 @@ impl Pipeline {
             });
 
         if let Some(image) = self.cache.borrow_mut().draw(handle, color, size) {
+            let x = (bounds.x * transform.sx) as i32;
+            let y = (bounds.y * transform.sy) as i32;
+
+            // Turned on its center, as the wgpu pipeline turns its quad; an
+            // upright image keeps its whole pixels.
+            let (turn, quality) = if radians == 0.0 {
+                (Transform::default(), tiny_skia::FilterQuality::Nearest)
+            } else {
+                (
+                    Transform::from_rotate_at(
+                        radians.to_degrees(),
+                        x as f32 + image.width() as f32 / 2.0,
+                        y as f32 + image.height() as f32 / 2.0,
+                    ),
+                    tiny_skia::FilterQuality::Bilinear,
+                )
+            };
+
             pixels.draw_pixmap(
-                (bounds.x * transform.sx) as i32,
-                (bounds.y * transform.sy) as i32,
+                x,
+                y,
                 image,
                 &tiny_skia::PixmapPaint {
                     opacity,
+                    quality,
                     ..tiny_skia::PixmapPaint::default()
                 },
-                Transform::default(),
+                turn,
                 clip_mask,
             );
         }
