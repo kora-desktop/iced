@@ -190,6 +190,7 @@ where
         if let Event::Keyboard(keyboard::Event::KeyPressed {
             key: keyboard::Key::Named(named),
             modifiers,
+            repeat,
             ..
         }) = event
         {
@@ -217,7 +218,10 @@ where
                     if let Some((on_activate, index)) =
                         self.on_activate.as_ref().zip(self.highlighted)
                     {
-                        shell.publish(on_activate(index));
+                        // Arrows repeat; a held Enter activates once.
+                        if !repeat {
+                            shell.publish(on_activate(index));
+                        }
                         shell.capture_event();
                         shell.request_redraw();
                         return;
@@ -324,6 +328,14 @@ mod tests {
     }
 
     fn press(named: key::Named, modifiers: keyboard::Modifiers) -> Event {
+        key_event(named, modifiers, false)
+    }
+
+    fn repeat(named: key::Named) -> Event {
+        key_event(named, keyboard::Modifiers::empty(), true)
+    }
+
+    fn key_event(named: key::Named, modifiers: keyboard::Modifiers, repeat: bool) -> Event {
         Event::Keyboard(keyboard::Event::KeyPressed {
             key: keyboard::Key::Named(named),
             modified_key: keyboard::Key::Named(named),
@@ -331,7 +343,7 @@ mod tests {
             location: keyboard::Location::Standard,
             modifiers,
             text: None,
-            repeat: false,
+            repeat,
         })
     }
 
@@ -388,6 +400,32 @@ mod tests {
             (vec![Nav::Activate(1)], true)
         );
         assert_eq!(feed(None, &press(key::Named::Enter, none)), (vec![], false));
+    }
+
+    #[test]
+    fn a_held_enter_or_space_activates_once() {
+        let none = keyboard::Modifiers::empty();
+        for named in [key::Named::Enter, key::Named::Space] {
+            assert_eq!(
+                feed(Some(1), &press(named, none)),
+                (vec![Nav::Activate(1)], true)
+            );
+            for _ in 0..20 {
+                assert_eq!(feed(Some(1), &repeat(named)), (vec![], true));
+            }
+            assert_eq!(
+                feed(Some(1), &press(named, none)),
+                (vec![Nav::Activate(1)], true)
+            );
+        }
+    }
+
+    #[test]
+    fn a_held_arrow_keeps_moving() {
+        assert_eq!(
+            feed(Some(0), &repeat(key::Named::ArrowDown)),
+            (vec![Nav::Highlight(1)], true)
+        );
     }
 
     #[test]

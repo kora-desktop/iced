@@ -421,12 +421,17 @@ where
             }
             Event::Keyboard(keyboard::Event::KeyPressed {
                 key: keyboard::Key::Named(key::Named::Enter | key::Named::Space),
+                repeat,
                 ..
             }) => {
                 let state = tree.state.downcast_ref::<State>();
 
                 if let Some(on_press) = self.on_press.as_ref().filter(|_| state.is_focused) {
-                    shell.publish(on_press.get());
+                    // A held key presses once, like a native button; its
+                    // repeats are still consumed.
+                    if !repeat {
+                        shell.publish(on_press.get());
+                    }
                     shell.capture_event();
                 }
             }
@@ -1123,6 +1128,73 @@ mod tests {
         );
 
         assert!(messages.is_empty());
+    }
+
+    fn key_press(named: key::Named, repeat: bool) -> Event {
+        Event::Keyboard(keyboard::Event::KeyPressed {
+            key: keyboard::Key::Named(named),
+            modified_key: keyboard::Key::Named(named),
+            physical_key: keyboard::key::Physical::Unidentified(
+                keyboard::key::NativeCode::Unidentified,
+            ),
+            location: keyboard::Location::Standard,
+            modifiers: keyboard::Modifiers::empty(),
+            text: None,
+            repeat,
+        })
+    }
+
+    /// Feeds one event to the button, returning what it published and whether
+    /// it captured the event.
+    fn feed(
+        button: &mut TestButton<'_>,
+        tree: &mut Tree,
+        node: &layout::Node,
+        event: &Event,
+    ) -> (Vec<Pressed>, bool) {
+        let mut messages = Vec::new();
+        let mut shell = Shell::new(&mut messages);
+
+        button.update(
+            tree,
+            event,
+            Layout::new(node),
+            mouse::Cursor::Unavailable,
+            &Recorder::default(),
+            &mut shell,
+            &Rectangle::with_size(Size::new(200.0, 50.0)),
+        );
+
+        let captured = shell.is_event_captured();
+        (messages, captured)
+    }
+
+    #[test]
+    fn a_held_key_presses_once_and_a_new_press_presses_again() {
+        for named in [key::Named::Enter, key::Named::Space] {
+            let mut button = button();
+            let mut tree = tree(&button);
+            let node = node(&mut button, &mut tree);
+            operation::Focusable::focus(tree.state.downcast_mut::<State>());
+
+            assert_eq!(
+                feed(&mut button, &mut tree, &node, &key_press(named, false)),
+                (vec![Pressed], true)
+            );
+
+            for _ in 0..20 {
+                assert_eq!(
+                    feed(&mut button, &mut tree, &node, &key_press(named, true)),
+                    (vec![], true),
+                    "a repeat of a held {named:?} must not press again"
+                );
+            }
+
+            assert_eq!(
+                feed(&mut button, &mut tree, &node, &key_press(named, false)),
+                (vec![Pressed], true)
+            );
+        }
     }
 
     #[test]
