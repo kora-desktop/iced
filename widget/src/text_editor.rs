@@ -1217,6 +1217,9 @@ pub struct KeyPress {
     pub modifiers: keyboard::Modifiers,
     /// The text produced by the key press.
     pub text: Option<SmolStr>,
+    /// Whether the press is a repeat of a held key. A binding that acts, such
+    /// as sending, should act once; typing and newlines repeat.
+    pub repeat: bool,
     /// The current [`Status`] of the [`TextEditor`].
     pub status: Status,
 }
@@ -1231,6 +1234,7 @@ impl<Message> Binding<Message> {
             modifiers,
             text,
             status,
+            ..
         } = event;
 
         if !matches!(status, Status::Focused { .. }) {
@@ -1429,6 +1433,7 @@ impl<Message> Update<Message> {
                 physical_key,
                 modifiers,
                 text,
+                repeat,
                 ..
             }) => {
                 let status = if state.focus.is_some() {
@@ -1445,6 +1450,7 @@ impl<Message> Update<Message> {
                     physical_key: *physical_key,
                     modifiers: *modifiers,
                     text: text.clone(),
+                    repeat: *repeat,
                     status,
                 };
 
