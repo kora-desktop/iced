@@ -25,6 +25,9 @@ thread_local! {
     /// focused. The runtime checks and clears this flag after processing
     /// widget operations, injecting a `FocusChanged` event when set.
     static FOCUS_DIRTY: Cell<bool> = const { Cell::new(false) };
+
+    /// Counts the times an operation gave a widget focus.
+    static FOCUS_GENERATION: Cell<u64> = const { Cell::new(0) };
 }
 
 /// Marks that a focus change occurred during an operation.
@@ -41,6 +44,25 @@ pub fn mark_focus_dirty() {
 /// Called by the runtime after processing widget operations.
 pub fn take_focus_dirty() -> bool {
     FOCUS_DIRTY.replace(false)
+}
+
+/// Marks that an operation gave a widget focus: bumps [`focus_generation`]
+/// and marks focus dirty.
+///
+/// Call it after [`Focusable::focus()`] in an operation that moves focus.
+pub fn mark_focus_gained() {
+    FOCUS_GENERATION.set(FOCUS_GENERATION.get().wrapping_add(1));
+    mark_focus_dirty();
+}
+
+/// Returns a counter that changes every time an operation gives a widget
+/// focus.
+///
+/// A widget that follows focus compares it between passes to tell that focus
+/// moved, even between widgets that have no [`Id`].
+#[must_use]
+pub fn focus_generation() -> u64 {
+    FOCUS_GENERATION.get()
 }
 
 /// The internal state of a widget that can be focused.
@@ -112,8 +134,13 @@ pub fn focus<T>(target: Id) -> impl Operation<T> {
         fn focusable(&mut self, id: Option<&Id>, _bounds: Rectangle, state: &mut dyn Focusable) {
             match id {
                 Some(id) if id == &self.target => {
+                    let was_focused = state.is_focused();
                     state.focus();
-                    mark_focus_dirty();
+                    if was_focused {
+                        mark_focus_dirty();
+                    } else {
+                        mark_focus_gained();
+                    }
                 }
                 _ => {
                     state.unfocus();
@@ -200,14 +227,14 @@ where
             match self.count.focused {
                 None if self.current == self.count.total - 1 => {
                     state.focus();
-                    mark_focus_dirty();
+                    mark_focus_gained();
                 }
                 Some(0) if self.current == 0 => state.unfocus(),
                 Some(0) => {}
                 Some(focused) if focused == self.current => state.unfocus(),
                 Some(focused) if focused - 1 == self.current => {
                     state.focus();
-                    mark_focus_dirty();
+                    mark_focus_gained();
                 }
                 _ => {}
             }
@@ -240,12 +267,12 @@ where
             match self.count.focused {
                 None if self.current == 0 => {
                     state.focus();
-                    mark_focus_dirty();
+                    mark_focus_gained();
                 }
                 Some(focused) if focused == self.current => state.unfocus(),
                 Some(focused) if focused + 1 == self.current => {
                     state.focus();
-                    mark_focus_dirty();
+                    mark_focus_gained();
                 }
                 _ => {}
             }
@@ -510,7 +537,7 @@ where
                 // Focus the target widget.
                 if self.current == target {
                     state.focus();
-                    mark_focus_dirty();
+                    mark_focus_gained();
                 }
             }
             self.current += 1;
@@ -1117,5 +1144,74 @@ mod tests {
             find_directional_target(&grouped_scan(&page, 0), FocusDirection::Right, false),
             Some(2)
         );
+    }
+
+    mod generation {
+        use crate::Rectangle;
+        use crate::widget::Id;
+        use crate::widget::operation::focusable::{
+            Focusable, focus, focus_generation, focus_next, focus_previous, unfocus,
+        };
+        use crate::widget::operation::{Operation, Outcome};
+
+        #[derive(Default)]
+        struct Field(bool);
+
+        impl Focusable for Field {
+            fn is_focused(&self) -> bool {
+                self.0
+            }
+            fn focus(&mut self) {
+                self.0 = true;
+            }
+            fn unfocus(&mut self) {
+                self.0 = false;
+            }
+        }
+
+        /// Runs `operation` over `fields`, which have no ids except the last.
+        fn run(fields: &mut [Field], operation: impl Operation<()> + 'static) {
+            let mut operation: Box<dyn Operation<()>> = Box::new(operation);
+            loop {
+                let last = fields.len() - 1;
+                operation.traverse(&mut |operation| {
+                    for (index, field) in fields.iter_mut().enumerate() {
+                        let id = (index == last).then(|| Id::new("last"));
+                        operation.focusable(id.as_ref(), Rectangle::default(), field);
+                    }
+                });
+                match operation.finish() {
+                    Outcome::Chain(next) => operation = next,
+                    _ => return,
+                }
+            }
+        }
+
+        #[test]
+        fn tab_between_fields_without_ids_moves_the_generation() {
+            let mut fields: Vec<Field> = (0..3).map(|_| Field::default()).collect();
+            let mut seen = focus_generation();
+            for (operation, focused) in [(0, 0), (0, 1), (0, 2), (1, 1)] {
+                if operation == 0 {
+                    run(&mut fields, focus_next());
+                } else {
+                    run(&mut fields, focus_previous());
+                }
+                assert!(fields[focused].0);
+                assert_ne!(focus_generation(), seen, "focus moved to {focused}");
+                seen = focus_generation();
+            }
+        }
+
+        #[test]
+        fn refocusing_or_unfocusing_leaves_the_generation() {
+            let mut fields: Vec<Field> = (0..2).map(|_| Field::default()).collect();
+            run(&mut fields, focus(Id::new("last")));
+            let seen = focus_generation();
+            run(&mut fields, focus(Id::new("last")));
+            run(&mut fields, unfocus());
+            assert!(!fields[1].0);
+            assert_eq!(focus_generation(), seen);
+        }
     }
 }
