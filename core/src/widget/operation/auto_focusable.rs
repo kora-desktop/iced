@@ -6,7 +6,7 @@
 //! widget exists, the first focusable widget receives focus instead.
 use crate::Rectangle;
 use crate::widget::Id;
-use crate::widget::operation::focusable::mark_focus_dirty;
+use crate::widget::operation::focusable::mark_focus_gained;
 use crate::widget::operation::{self, Focusable, Operation, Outcome};
 
 /// Result of the first tree-walk phase.
@@ -118,7 +118,7 @@ fn apply<T>(result: ScanResult) -> impl Operation<T> {
             if self.has_target && self.current == self.target {
                 log::debug!("[focus_auto] focusing widget at index {}", self.current);
                 state.focus();
-                mark_focus_dirty();
+                mark_focus_gained();
             } else {
                 state.unfocus();
             }
