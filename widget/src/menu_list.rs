@@ -229,7 +229,10 @@ where
                 }
                 key::Named::Escape => {
                     if let Some(on_dismiss) = &self.on_dismiss {
-                        shell.publish(on_dismiss.clone());
+                        // Once per press: a held Escape closes one layer.
+                        if !repeat {
+                            shell.publish(on_dismiss.clone());
+                        }
                         shell.capture_event();
                         shell.request_redraw();
                         return;
@@ -418,6 +421,22 @@ mod tests {
                 (vec![Nav::Activate(1)], true)
             );
         }
+    }
+
+    #[test]
+    fn a_held_escape_dismisses_once() {
+        let none = keyboard::Modifiers::empty();
+        assert_eq!(
+            feed(Some(1), &press(key::Named::Escape, none)),
+            (vec![Nav::Dismiss], true)
+        );
+        for _ in 0..20 {
+            assert_eq!(feed(Some(1), &repeat(key::Named::Escape)), (vec![], true));
+        }
+        assert_eq!(
+            feed(Some(1), &press(key::Named::Escape, none)),
+            (vec![Nav::Dismiss], true)
+        );
     }
 
     #[test]

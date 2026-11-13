@@ -974,6 +974,7 @@ where
                 text,
                 modified_key,
                 physical_key,
+                repeat,
                 ..
             }) => {
                 let state = state::<Renderer>(tree);
@@ -1234,7 +1235,10 @@ where
                     match modified_key.as_ref() {
                         keyboard::Key::Named(key::Named::Enter) => {
                             if let Some(on_submit) = self.on_submit.clone() {
-                                shell.publish(on_submit);
+                                // A held Enter submits once.
+                                if !repeat {
+                                    shell.publish(on_submit);
+                                }
                                 shell.capture_event();
                             }
                         }
