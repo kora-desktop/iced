@@ -918,6 +918,12 @@ where
                         shell.capture_event();
                     }
 
+                    let binding = if self.content.selection().is_some() {
+                        without_word_selection(binding)
+                    } else {
+                        binding
+                    };
+
                     apply_binding(binding, self.content, state, on_edit, shell);
 
                     if let Some(focus) = &mut state.focus {
@@ -1246,11 +1252,13 @@ impl<Message> Binding<Message> {
             Some('x') if is_editing_shortcut(modifiers) => Some(Self::Cut),
             // `Shift` deliberately allowed: `Ctrl+Shift+V` means "paste as
             // plain text", which in an editor of plain text is a paste.
-            Some('v') if modifiers.command() && !modifiers.alt() => Some(Self::Paste),
+            Some('v') if modifiers.edit_command() && !modifiers.alt() => Some(Self::Paste),
             Some('a') if is_editing_shortcut(modifiers) => Some(Self::SelectAll),
             Some('z') if is_editing_shortcut(modifiers) => Some(Self::Undo),
-            Some('z') if modifiers.command() && modifiers.shift() => Some(Self::Redo),
-            Some('y') if is_editing_shortcut(modifiers) => Some(Self::Redo),
+            Some('z') if modifiers.edit_command() && modifiers.shift() && !modifiers.alt() => {
+                Some(Self::Redo)
+            }
+            Some('y') if modifiers.command() && is_editing_shortcut(modifiers) => Some(Self::Redo),
             _ => None,
         };
 
@@ -1263,15 +1271,28 @@ impl<Message> Binding<Message> {
 
         match modified_key.as_ref() {
             keyboard::Key::Named(key::Named::Enter) => Some(Self::Enter),
+            keyboard::Key::Named(key::Named::Backspace) if modifiers.word_jump() => {
+                Some(Self::Sequence(vec![
+                    Self::Select(Motion::WordLeft),
+                    Self::Backspace,
+                ]))
+            }
             keyboard::Key::Named(key::Named::Backspace) => Some(Self::Backspace),
             keyboard::Key::Named(key::Named::Delete)
                 if text.is_none() || text.as_deref() == Some("\u{7f}") =>
             {
-                Some(Self::Delete)
+                if modifiers.word_jump() {
+                    Some(Self::Sequence(vec![
+                        Self::Select(Motion::WordRight),
+                        Self::Delete,
+                    ]))
+                } else {
+                    Some(Self::Delete)
+                }
             }
             keyboard::Key::Named(key::Named::Escape) => Some(Self::Unfocus),
             _ => {
-                if let Some(text) = text {
+                if let Some(text) = text.filter(|_| crate::text_input::types_text(modifiers)) {
                     let c = text.chars().find(|c| !c.is_control())?;
 
                     Some(Self::Insert(c))
@@ -1288,7 +1309,10 @@ impl<Message> Binding<Message> {
                         motion
                     };
 
-                    let motion = if modifiers.jump() {
+                    // Alt widens only sideways: `Alt+Up` is not a paragraph jump.
+                    let motion = if modifiers.jump()
+                        || (modifiers.word_jump() && matches!(motion, Motion::Left | Motion::Right))
+                    {
                         motion.widen()
                     } else {
                         motion
@@ -1472,7 +1496,24 @@ impl<Message> Update<Message> {
 /// predicate in `text_input`: a chord that merely contains the command key
 /// belongs to the window, not to the widget with the caret.
 fn is_editing_shortcut(modifiers: keyboard::Modifiers) -> bool {
-    modifiers.command() && !modifiers.shift() && !modifiers.alt()
+    modifiers.edit_command() && !modifiers.shift() && !modifiers.alt()
+}
+
+/// A word delete removes only the selection when there is one, as a plain
+/// `Backspace` or `Delete` would.
+fn without_word_selection<Message>(binding: Binding<Message>) -> Binding<Message> {
+    match binding {
+        Binding::Sequence(sequence)
+            if matches!(
+                sequence.as_slice(),
+                [Binding::Select(Motion::WordLeft), Binding::Backspace]
+                    | [Binding::Select(Motion::WordRight), Binding::Delete]
+            ) =>
+        {
+            sequence.into_iter().nth(1).unwrap_or(Binding::Backspace)
+        }
+        binding => binding,
+    }
 }
 
 fn motion(key: key::Named) -> Option<Motion> {
@@ -1660,5 +1701,181 @@ mod tests {
             selection: Some(at(2, 1)),
         });
         assert_eq!(surrounding(&editor), around("Find", 2, 4));
+    }
+
+    fn press(key: keyboard::Key, modifiers: keyboard::Modifiers) -> Option<Binding<()>> {
+        let text = match key.as_ref() {
+            keyboard::Key::Character(c) if modifiers.control() => {
+                char::from_u32(u32::from(c.as_bytes()[0] - b'a' + 1)).map(|c| c.to_string().into())
+            }
+            keyboard::Key::Character(c) => Some(c.into()),
+            _ => None,
+        };
+        Binding::from_key_press(KeyPress {
+            key: key.clone(),
+            modified_key: key,
+            physical_key: keyboard::key::Physical::Unidentified(
+                keyboard::key::NativeCode::Unidentified,
+            ),
+            modifiers,
+            text,
+            repeat: false,
+            status: Status::Focused { is_hovered: false },
+        })
+    }
+
+    fn letter(c: &str, modifiers: keyboard::Modifiers) -> Option<Binding<()>> {
+        press(keyboard::Key::Character(c.into()), modifiers)
+    }
+
+    fn named(key: key::Named, modifiers: keyboard::Modifiers) -> Option<Binding<()>> {
+        press(keyboard::Key::Named(key), modifiers)
+    }
+
+    /// The command key of the platform, and Super off macOS (Kora's editing chords).
+    fn editing_modifiers() -> Vec<keyboard::Modifiers> {
+        if cfg!(target_os = "macos") {
+            vec![keyboard::Modifiers::COMMAND]
+        } else {
+            vec![keyboard::Modifiers::CTRL, keyboard::Modifiers::LOGO]
+        }
+    }
+
+    #[test]
+    fn editing_chords_answer_to_ctrl_and_super() {
+        let shift = keyboard::Modifiers::SHIFT;
+        for m in editing_modifiers() {
+            assert_eq!(letter("x", m), Some(Binding::Cut), "{m:?}+X");
+            assert_eq!(letter("c", m), Some(Binding::Copy), "{m:?}+C");
+            assert_eq!(letter("v", m), Some(Binding::Paste), "{m:?}+V");
+            assert_eq!(
+                letter("v", m | shift),
+                Some(Binding::Paste),
+                "{m:?}+Shift+V"
+            );
+            assert_eq!(letter("z", m), Some(Binding::Undo), "{m:?}+Z");
+            assert_eq!(letter("z", m | shift), Some(Binding::Redo), "{m:?}+Shift+Z");
+            assert_eq!(letter("a", m), Some(Binding::SelectAll), "{m:?}+A");
+        }
+        assert_eq!(
+            letter("y", keyboard::Modifiers::COMMAND),
+            Some(Binding::Redo)
+        );
+    }
+
+    #[cfg(not(target_os = "macos"))]
+    #[test]
+    fn a_held_super_types_nothing() {
+        let logo = keyboard::Modifiers::LOGO;
+        for c in ["b", "y", "k", "q"] {
+            assert_eq!(letter(c, logo), None, "Super+{c}");
+            assert_eq!(
+                letter(c, logo | keyboard::Modifiers::SHIFT),
+                None,
+                "Super+Shift+{c}"
+            );
+        }
+        let both = keyboard::Modifiers::CTRL | logo;
+        for c in ["x", "c", "v", "z", "a"] {
+            assert_eq!(letter(c, both), None, "Ctrl+Super+{c}");
+        }
+        assert_eq!(
+            letter("b", keyboard::Modifiers::empty()),
+            Some(Binding::Insert('b'))
+        );
+    }
+
+    #[test]
+    fn alt_and_ctrl_arrows_move_and_select_by_words() {
+        let mut jumps = vec![keyboard::Modifiers::ALT];
+        if !cfg!(target_os = "macos") {
+            jumps.push(keyboard::Modifiers::CTRL);
+        }
+        for jump in jumps {
+            let select = jump | keyboard::Modifiers::SHIFT;
+            assert_eq!(
+                named(key::Named::ArrowLeft, jump),
+                Some(Binding::Move(Motion::WordLeft))
+            );
+            assert_eq!(
+                named(key::Named::ArrowRight, jump),
+                Some(Binding::Move(Motion::WordRight))
+            );
+            assert_eq!(
+                named(key::Named::ArrowLeft, select),
+                Some(Binding::Select(Motion::WordLeft))
+            );
+            assert_eq!(
+                named(key::Named::ArrowRight, select),
+                Some(Binding::Select(Motion::WordRight))
+            );
+        }
+        // Alt does not turn Up and Down into paragraph or page jumps.
+        if !cfg!(target_os = "macos") {
+            assert_eq!(
+                named(key::Named::ArrowUp, keyboard::Modifiers::ALT),
+                Some(Binding::Move(Motion::Up))
+            );
+        }
+    }
+
+    fn line_after(text: &str, at: Cursor, binding: Binding<()>) -> String {
+        let mut editor = Editor::with_text(text);
+        editor.move_to(at);
+        // As the widget does: it knows the selection, the binding does not.
+        let binding = if editor.copy().is_some() {
+            without_word_selection(binding)
+        } else {
+            binding
+        };
+        let actions = match binding {
+            Binding::Sequence(sequence) => sequence,
+            binding => vec![binding],
+        };
+        for binding in actions {
+            editor.perform(match binding {
+                Binding::Select(motion) => Action::Select(motion),
+                Binding::Backspace => Action::Edit(Edit::Backspace),
+                Binding::Delete => Action::Edit(Edit::Delete),
+                binding => panic!("not a delete: {binding:?}"),
+            });
+        }
+        editor
+            .line(0)
+            .map(|line| line.text.to_string())
+            .unwrap_or_default()
+    }
+
+    #[test]
+    fn alt_and_ctrl_delete_by_words() {
+        let mut jumps = vec![keyboard::Modifiers::ALT];
+        if !cfg!(target_os = "macos") {
+            jumps.push(keyboard::Modifiers::CTRL);
+        }
+        let end = Cursor {
+            position: at(0, 13),
+            selection: None,
+        };
+        let start = Cursor {
+            position: at(0, 0),
+            selection: None,
+        };
+        for jump in jumps {
+            let back = named(key::Named::Backspace, jump).expect("a binding");
+            assert_eq!(line_after("one two three", end, back.clone()), "one two ");
+            let delete = named(key::Named::Delete, jump).expect("a binding");
+            assert_eq!(line_after("one two three", start, delete), " two three");
+
+            // With a selection, only the selection goes.
+            let selected = Cursor {
+                position: at(0, 13),
+                selection: Some(at(0, 12)),
+            };
+            assert_eq!(line_after("one two three", selected, back), "one two thre");
+        }
+        assert_eq!(
+            named(key::Named::Backspace, keyboard::Modifiers::empty()),
+            Some(Binding::Backspace)
+        );
     }
 }
