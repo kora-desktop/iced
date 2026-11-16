@@ -90,20 +90,13 @@ fn modifiers(ui: &mut Ui<'_>, modifiers: Modifiers) {
 
 /// The platform's command shortcut for `key`: Ctrl, or Cmd on macOS.
 fn shortcut(ui: &mut Ui<'_>, key: &str) {
-    chord(ui, Modifiers::COMMAND, key);
-}
-
-/// `key` with `held` down, as the window reports it.
-fn chord(ui: &mut Ui<'_>, held: Modifiers, key: &str) {
-    modifiers(ui, held);
     let mut press = simulator::press_key(keyboard::Key::Character(key.into()), None);
 
     if let Event::Keyboard(keyboard::Event::KeyPressed { modifiers, .. }) = &mut press {
-        *modifiers = held;
+        *modifiers = Modifiers::COMMAND;
     }
 
     let _ = ui.simulate([press]);
-    modifiers(ui, Modifiers::empty());
 }
 
 fn three_bands<'a>(selectable: [bool; 3]) -> Ui<'a> {
@@ -363,25 +356,4 @@ fn text_after_a_scrolled_scrollable_selects_where_it_is_drawn() {
     shortcut(&mut ui, "c");
 
     assert_eq!(ui.clipboard(), Some("Omega"));
-}
-
-/// Kora edits on Super off macOS: Super+A and Super+C select and copy as
-/// Ctrl+A and Ctrl+C do; Ctrl and Super together do neither.
-#[cfg(not(target_os = "macos"))]
-#[test]
-fn super_selects_all_and_copies_like_ctrl() {
-    if !measures_text() {
-        return;
-    }
-
-    let mut ui = three_bands([true, true, false]);
-
-    click(&mut ui, on(0, 1.0));
-    chord(&mut ui, Modifiers::CTRL | Modifiers::LOGO, "a");
-    chord(&mut ui, Modifiers::CTRL | Modifiers::LOGO, "c");
-    assert_eq!(ui.clipboard(), None, "Ctrl+Super is not an editing chord");
-
-    chord(&mut ui, Modifiers::LOGO, "a");
-    chord(&mut ui, Modifiers::LOGO, "c");
-    assert_eq!(ui.clipboard(), Some("Alpha beta gamma\nDelta epsilon"));
 }

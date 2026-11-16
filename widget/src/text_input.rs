@@ -1031,7 +1031,7 @@ where
                         // the arms around it: `Ctrl+Shift+V` means "paste as
                         // plain text" wherever it is bound, and in an input
                         // that holds nothing but plain text it is a paste.
-                        Some('v') if modifiers.edit_command() && !modifiers.alt() => {
+                        Some('v') if modifiers.command() && !modifiers.alt() => {
                             let Some(on_input) = &self.on_input else {
                                 return;
                             };
@@ -1121,11 +1121,10 @@ where
                             return;
                         }
                         Some('z')
-                            if modifiers.edit_command()
-                                && modifiers.shift()
-                                && !modifiers.alt() =>
+                            if state.keyboard_modifiers.command()
+                                && state.keyboard_modifiers.shift() =>
                         {
-                            // Redo (Ctrl+Shift+Z, or Super+Shift+Z)
+                            // Redo (Ctrl+Shift+Z)
                             let Some(on_input) = &self.on_input else {
                                 return;
                             };
@@ -1157,7 +1156,7 @@ where
                             }
                             return;
                         }
-                        Some('y') if modifiers.command() && is_editing_shortcut(modifiers) => {
+                        Some('y') if is_editing_shortcut(modifiers) => {
                             // Redo (Ctrl+Y)
                             let Some(on_input) = &self.on_input else {
                                 return;
@@ -1193,7 +1192,7 @@ where
                         _ => {}
                     }
 
-                    if let Some(text) = text.as_ref().filter(|_| types_text(modifiers)) {
+                    if let Some(text) = text {
                         let Some(on_input) = &self.on_input else {
                             return;
                         };
@@ -1249,13 +1248,12 @@ where
                             };
 
                             if state.cursor.selection(&self.value).is_none() {
-                                if (self.is_secure && modifiers.word_jump())
-                                    || modifiers.macos_command()
+                                if (self.is_secure && modifiers.jump()) || modifiers.macos_command()
                                 {
                                     state
                                         .cursor
                                         .select_range(state.cursor.start(&self.value), 0);
-                                } else if modifiers.word_jump() {
+                                } else if modifiers.jump() {
                                     state.cursor.select_left_by_words(&self.value);
                                 }
                             }
@@ -1288,14 +1286,13 @@ where
                             };
 
                             if state.cursor.selection(&self.value).is_none() {
-                                if (self.is_secure && modifiers.word_jump())
-                                    || modifiers.macos_command()
+                                if (self.is_secure && modifiers.jump()) || modifiers.macos_command()
                                 {
                                     state.cursor.select_range(
                                         state.cursor.start(&self.value),
                                         self.value.len(),
                                     );
-                                } else if modifiers.word_jump() {
+                                } else if modifiers.jump() {
                                     state.cursor.select_right_by_words(&self.value);
                                 }
                             }
@@ -1370,9 +1367,7 @@ where
                                 );
                             let cursor_before = state.cursor;
 
-                            if (self.is_secure && modifiers.word_jump())
-                                || modifiers.macos_command()
-                            {
+                            if (self.is_secure && modifiers.jump()) || modifiers.macos_command() {
                                 if modifiers.shift() {
                                     state
                                         .cursor
@@ -1380,7 +1375,7 @@ where
                                 } else {
                                     state.cursor.move_to(0);
                                 }
-                            } else if modifiers.word_jump() {
+                            } else if modifiers.jump() {
                                 if modifiers.shift() {
                                     state.cursor.select_left_by_words(&self.value);
                                 } else {
@@ -1408,9 +1403,7 @@ where
                                 && matches!(state.cursor.state(&self.value), cursor::State::Index(i) if i == self.value.len());
                             let cursor_before = state.cursor;
 
-                            if (self.is_secure && modifiers.word_jump())
-                                || modifiers.macos_command()
-                            {
+                            if (self.is_secure && modifiers.jump()) || modifiers.macos_command() {
                                 if modifiers.shift() {
                                     state.cursor.select_range(
                                         state.cursor.start(&self.value),
@@ -1419,7 +1412,7 @@ where
                                 } else {
                                     state.cursor.move_to(self.value.len());
                                 }
-                            } else if modifiers.word_jump() {
+                            } else if modifiers.jump() {
                                 if modifiers.shift() {
                                     state.cursor.select_right_by_words(&self.value);
                                 } else {
@@ -1818,21 +1811,14 @@ pub struct State<P: text::Paragraph> {
 
 /// Whether these modifiers name an editing shortcut a focused input owns.
 ///
-/// The command key or, off macOS, Super ([`keyboard::Modifiers::edit_command`]),
-/// and neither `Shift` nor `Alt`. A chord that merely
+/// The command key, and neither `Shift` nor `Alt`. A chord that merely
 /// contains the command key is somebody else's: `Ctrl+Shift+C` is the copy
 /// chord of every terminal emulator, because `Ctrl+C` there is an interrupt,
 /// and an input that answered to it would take that away from the window it
 /// is sitting in. `Alt` is excluded because `AltGr` arrives as `Ctrl+Alt` on
 /// Windows, where it types a character rather than naming a command.
 fn is_editing_shortcut(modifiers: keyboard::Modifiers) -> bool {
-    modifiers.edit_command() && !modifiers.shift() && !modifiers.alt()
-}
-
-/// Whether a key press with these modifiers types its text. Off macOS a held
-/// Super names a shortcut, never a character, even when no widget binds it.
-pub(crate) fn types_text(modifiers: keyboard::Modifiers) -> bool {
-    cfg!(target_os = "macos") || !modifiers.logo()
+    modifiers.command() && !modifiers.shift() && !modifiers.alt()
 }
 
 fn state<Renderer: text::Renderer>(tree: &mut Tree) -> &mut State<Renderer::Paragraph> {
