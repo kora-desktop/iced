@@ -445,7 +445,7 @@ where
                         repeat: false,
                         ..
                     }) if status == event::Status::Ignored
-                        && modifiers.command()
+                        && modifiers.edit_command()
                         && !modifiers.alt()
                         && !modifiers.shift() =>
                     {
