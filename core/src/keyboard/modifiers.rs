@@ -99,28 +99,6 @@ impl Modifiers {
         }
     }
 
-    /// Returns true if the modifier of a text editing command (cut, copy,
-    /// paste, undo, redo, select all) is pressed.
-    ///
-    /// It is the command key, and on platforms other than macOS also the
-    /// `logo` (Super) key in its place: Kora's shortcut list edits on Super,
-    /// as macOS does on ⌘. Holding both `Ctrl` and `logo` is neither.
-    pub fn edit_command(self) -> bool {
-        if cfg!(target_os = "macos") {
-            self.logo()
-        } else {
-            self.control() != self.logo()
-        }
-    }
-
-    /// Returns true if a modifier that moves or deletes by words is pressed.
-    ///
-    /// It is the "jump key", and `Alt` on every platform, as `Option` on
-    /// macOS: Kora's compositor takes `Ctrl+Left/Right` for desktops.
-    pub fn word_jump(self) -> bool {
-        self.jump() || self.alt()
-    }
-
     /// Returns true if the "command key" is pressed on a macOS device.
     ///
     /// This is relevant for macOS-specific actions (e.g. `⌘ + ArrowLeft` moves the cursor

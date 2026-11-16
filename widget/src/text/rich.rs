@@ -874,7 +874,7 @@ where
                 modifiers,
                 ..
             }) if self.selectable
-                && modifiers.edit_command()
+                && modifiers.command()
                 && !modifiers.shift()
                 && !modifiers.alt()
                 && c.as_str() == "c" =>
