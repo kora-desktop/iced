@@ -55,6 +55,8 @@ mod image;
 mod blur_tests;
 #[cfg(test)]
 mod health_tests;
+#[cfg(all(test, feature = "image"))]
+mod image_turn_tests;
 #[cfg(test)]
 mod mesh_tests;
 #[cfg(test)]

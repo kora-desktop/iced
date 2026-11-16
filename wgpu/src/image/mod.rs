@@ -651,6 +651,7 @@ fn add_instances(
                     fragment_width as f32 * scaling_x,
                     fragment_height as f32 * scaling_y,
                 ];
+                let (center, tile) = turned_fragment(center, tile, rotation);
 
                 add_instance(
                     center,
@@ -665,6 +666,29 @@ fn add_instances(
             }
         }
     }
+}
+
+/// A fragment `tile` of an image turned `rotation` about `center`, as the
+/// shader draws it. The shader samples a tile about the tile's own centre, so
+/// the fragment turns there and its centre moves to where the turn takes it.
+fn turned_fragment(center: [f32; 2], tile: [f32; 4], rotation: f32) -> ([f32; 2], [f32; 4]) {
+    let (sin, cos) = rotation.sin_cos();
+    let dx = tile[0] + tile[2] / 2.0 - center[0];
+    let dy = tile[1] + tile[3] / 2.0 - center[1];
+    let moved = [
+        center[0] + dx * cos - dy * sin,
+        center[1] + dx * sin + dy * cos,
+    ];
+
+    (
+        moved,
+        [
+            moved[0] - tile[2] / 2.0,
+            moved[1] - tile[3] / 2.0,
+            tile[2],
+            tile[3],
+        ],
+    )
 }
 
 #[inline]
@@ -699,4 +723,94 @@ fn add_instance(
     };
 
     instances.push(instance);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::turned_fragment;
+    use std::f32::consts::{FRAC_PI_2, PI};
+
+    /// The box a fragment covers once turned about its own centre.
+    fn covered(center: [f32; 2], tile: [f32; 4], rotation: f32) -> [f32; 4] {
+        let (center, tile) = turned_fragment(center, tile, rotation);
+        let quarter = (rotation / FRAC_PI_2).round() as i32 % 2 != 0;
+        let (w, h) = if quarter {
+            (tile[3], tile[2])
+        } else {
+            (tile[2], tile[3])
+        };
+
+        [center[0] - w / 2.0, center[1] - h / 2.0, w, h]
+    }
+
+    fn assert_near(a: [f32; 4], b: [f32; 4]) {
+        assert!(
+            a.iter().zip(b).all(|(a, b)| (a - b).abs() < 1e-2),
+            "{a:?} != {b:?}"
+        );
+    }
+
+    /// The fragments of a 3840 by 2160 image, as a 2048 atlas cuts them.
+    const FRAGMENTS: [[f32; 4]; 4] = [
+        [0.0, 0.0, 2048.0, 2048.0],
+        [2048.0, 0.0, 1792.0, 2048.0],
+        [0.0, 2048.0, 2048.0, 112.0],
+        [2048.0, 2048.0, 1792.0, 112.0],
+    ];
+    const W: f32 = 3840.0;
+    const H: f32 = 2160.0;
+    /// The top left of the image turned a quarter about its centre.
+    const LEFT: f32 = (W - H) / 2.0;
+    const TOP: f32 = (H - W) / 2.0;
+
+    #[test]
+    fn unturned_fragments_stay_put() {
+        for tile in FRAGMENTS {
+            assert_eq!(turned_fragment([W / 2.0, H / 2.0], tile, 0.0).1, tile);
+        }
+    }
+
+    #[test]
+    fn a_quarter_turn_moves_each_fragment_with_the_image() {
+        // Clockwise, the image's point (x, y) goes to (H - y, x).
+        for tile in FRAGMENTS {
+            let [x, y, w, h] = tile;
+            assert_near(
+                covered([W / 2.0, H / 2.0], tile, FRAC_PI_2),
+                [LEFT + H - y - h, TOP + x, h, w],
+            );
+        }
+    }
+
+    #[test]
+    fn half_and_three_quarter_turns_move_each_fragment_with_the_image() {
+        for tile in FRAGMENTS {
+            let [x, y, w, h] = tile;
+            assert_near(
+                covered([W / 2.0, H / 2.0], tile, PI),
+                [W - x - w, H - y - h, w, h],
+            );
+            // (x, y) goes to (y, W - x).
+            assert_near(
+                covered([W / 2.0, H / 2.0], tile, 3.0 * FRAC_PI_2),
+                [LEFT + y, TOP + W - x - w, h, w],
+            );
+        }
+    }
+
+    #[test]
+    fn fragments_of_a_scaled_offset_image_turn_about_its_centre() {
+        // Drawn at a third of its size with its top left at (100, 50).
+        let s = 1.0 / 3.0;
+        let center = [100.0 + W * s / 2.0, 50.0 + H * s / 2.0];
+        for [x, y, w, h] in FRAGMENTS {
+            let tile = [100.0 + x * s, 50.0 + y * s, w * s, h * s];
+            // The turned image's top left is its centre less half its turned size.
+            let (left, top) = (center[0] - H * s / 2.0, center[1] - W * s / 2.0);
+            assert_near(
+                covered(center, tile, FRAC_PI_2),
+                [left + (H - y - h) * s, top + x * s, h * s, w * s],
+            );
+        }
+    }
 }
