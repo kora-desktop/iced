@@ -679,6 +679,7 @@ where
                                 constraint_adjustment,
                                 grab,
                                 blur,
+                                blur_style,
                                 shadow,
                                 corner_radius,
                                 window_geometry,
@@ -688,8 +689,8 @@ where
                             } => {
                                 use winit::platform::wayland::ActiveEventLoopExtWayland;
                                 use winit::platform::wayland::{
-                                    PopupAnchor, PopupGravity, PopupId as WinitPopupId,
-                                    PopupSettings as WinitPopupSettings,
+                                    PopupAnchor, PopupBlurStyle, PopupGravity,
+                                    PopupId as WinitPopupId, PopupSettings as WinitPopupSettings,
                                 };
 
                                 let settings = WinitPopupSettings {
@@ -702,6 +703,12 @@ where
                                     constraint_adjustment,
                                     grab,
                                     blur,
+                                    blur_style: PopupBlurStyle {
+                                        radius: blur_style.radius,
+                                        saturation: blur_style.saturation,
+                                        tint: blur_style.tint,
+                                        border: blur_style.border,
+                                    },
                                     shadow,
                                     corner_radius,
                                     window_geometry,
@@ -914,6 +921,7 @@ enum Control {
         constraint_adjustment: u32,
         grab: bool,
         blur: bool,
+        blur_style: crate::runtime::platform_specific::wayland::popup::BlurStyle,
         shadow: bool,
         corner_radius: Option<u32>,
         window_geometry: Option<(i32, i32, i32, i32)>,
@@ -3806,6 +3814,7 @@ fn run_action<'a, P, C>(
                                             .constraint_adjustment,
                                         grab: settings.grab,
                                         blur: settings.blur,
+                                        blur_style: popup::blur_style(settings.id),
                                         shadow: settings.shadow,
                                         corner_radius: settings.corner_radius,
                                         window_geometry,

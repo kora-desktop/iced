@@ -342,6 +342,7 @@ where
         let _ = self.fits.remove(&iced_id);
         self.keyboard.forget(iced_id);
         runtime_popup::forget_keyboard_input(iced_id);
+        runtime_popup::forget_blur_style(iced_id);
     }
 
     /// Opt popup `iced_id` in or out of keyboard input; `false` if it is neither requested nor
@@ -460,6 +461,7 @@ where
         let removed = self.entries.remove(&id)?;
         self.keyboard.forget(removed.iced_id);
         runtime_popup::forget_keyboard_input(removed.iced_id);
+        runtime_popup::forget_blur_style(removed.iced_id);
         Some(removed)
     }
 
