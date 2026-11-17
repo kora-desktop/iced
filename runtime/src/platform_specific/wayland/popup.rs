@@ -6,7 +6,7 @@
 use iced_core::layout::Limits;
 use iced_core::window::Id;
 use iced_core::{Rectangle, Size};
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, PoisonError};
@@ -427,6 +427,53 @@ pub fn forget_capture_exclusion(id: Id) {
         .remove(&id);
 }
 
+/// How the compositor draws a popup's blur, in the units of CSS `backdrop-filter`. A value left
+/// `None` keeps the compositor's default for it.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
+pub struct BlurStyle {
+    /// Blur radius, in logical pixels.
+    pub radius: Option<f32>,
+    /// Saturation of the blurred backdrop: `1.0` leaves it as it is.
+    pub saturation: Option<f32>,
+    /// Strength of the compositor's white frosted tint over the backdrop: `0.0` for none.
+    pub tint: Option<f32>,
+    /// Alpha of the compositor's 1 px light border around the backdrop: `0.0` for none.
+    pub border: Option<f32>,
+}
+
+/// Blur styles of popups, by ID: a register like [`keyboard_input`]'s.
+static BLUR_STYLES: Mutex<BTreeMap<Id, BlurStyle>> = Mutex::new(BTreeMap::new());
+
+/// Style the blur [`PopupSettings::blur`] asks for behind the popup `id`.
+///
+/// The compositor's defaults suit an app window: a white frosted tint and a light border. A
+/// popup that draws its own glass and hairline turns both off. Set it before [`show`]; only
+/// `iced_winit` reads it (`iced_layershell` styles a popup's blur as its parent's).
+pub fn set_blur_style(id: Id, style: BlurStyle) {
+    let _ = BLUR_STYLES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .insert(id, style);
+}
+
+/// The blur style of the popup `id`; a backend asks as it creates the popup.
+pub fn blur_style(id: Id) -> BlurStyle {
+    BLUR_STYLES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .get(&id)
+        .copied()
+        .unwrap_or_default()
+}
+
+/// Forget the popup `id`'s blur style; a backend drops it with the popup.
+pub fn forget_blur_style(id: Id) {
+    let _ = BLUR_STYLES
+        .lock()
+        .unwrap_or_else(PoisonError::into_inner)
+        .remove(&id);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -470,5 +517,22 @@ mod tests {
         exclude_from_capture(id, true);
         forget_capture_exclusion(id);
         assert!(!excluded_from_capture(id));
+    }
+
+    #[test]
+    fn a_popup_keeps_the_compositor_blur_until_it_sets_a_style() {
+        let id = Id::unique();
+        assert_eq!(blur_style(id), BlurStyle::default());
+        let glass = BlurStyle {
+            radius: Some(40.0),
+            saturation: Some(1.3),
+            tint: Some(0.0),
+            border: Some(0.0),
+        };
+        set_blur_style(id, glass);
+        assert_eq!(blur_style(id), glass);
+        assert_eq!(blur_style(Id::unique()), BlurStyle::default());
+        forget_blur_style(id);
+        assert_eq!(blur_style(id), BlurStyle::default());
     }
 }
