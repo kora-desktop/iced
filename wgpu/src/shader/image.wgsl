@@ -76,12 +76,13 @@ fn vs_main(input: VertexInput) -> VertexOutput {
     out.position = vec4<f32>(v_pos, 0.0, 1.0);
     out.clip_bounds = input.clip_bounds;
 
-    // Calculate rotated UV
-    let uv = input.atlas_pos + (v_pos - tile.xy) / tile.zw * input.atlas_scale;
-    let uv_center = input.atlas_pos + input.atlas_scale / 2.0;
-
-    let d = uv - uv_center;
-    out.uv = vec2<f32>(d.x * cos_r - d.y * sin_r, d.x * sin_r + d.y * cos_r) + uv_center;
+    // Turn the vertex back into the unturned tile, then read the atlas there.
+    // Turning in atlas space instead stretches the image when the tile's
+    // scale differs across its axes, as rounded bounds make it, and a quarter
+    // turn then reads past the tile's edge and leaves its last row undrawn.
+    let v = v_pos - center;
+    let unturned = vec2<f32>(v.x * cos_r - v.y * sin_r, v.x * sin_r + v.y * cos_r) + center;
+    out.uv = input.atlas_pos + (unturned - tile.xy) / tile.zw * input.atlas_scale;
 
     out.position = globals.transform * out.position;
     out.border_radius = min(input.border_radius, vec4(min(input.clip_bounds.z, input.clip_bounds.w) / 2.0));
@@ -106,7 +107,11 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     ) / 2.0;
 
     let antialias: f32 = clamp(1.0 - d, 0.0, 1.0);
-    let inside = all(input.uv >= input.atlas.xy) && all(input.uv <= input.atlas.zw);
+    // A pixel centred on a tile's edge, where two fragments meet, reads its
+    // tile's edge give or take rounding: allow a 256th of a pixel, finer than
+    // a rasterizer places an edge.
+    let slack = fwidth(input.uv) / 256.0;
+    let inside = all(input.uv >= input.atlas.xy - slack) && all(input.uv <= input.atlas.zw + slack);
 
     let sample = textureSample(u_texture, u_sampler, input.uv, input.layer) * vec4<f32>(1.0, 1.0, 1.0, antialias * input.opacity * f32(inside));
     return premultiply(sample);
