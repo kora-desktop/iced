@@ -6386,6 +6386,7 @@ name = "text_drag"
 version = "0.1.0"
 dependencies = [
  "iced",
+ "tracing-subscriber",
 ]
 
 [[package]]

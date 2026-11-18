@@ -12,6 +12,8 @@ use iced::{Element, Event, Fill, Length, Point, Rectangle, Size, Theme};
 const MIME: &str = "application/x-example-selection+json";
 
 pub fn main() -> iced::Result {
+    tracing_subscriber::fmt::init();
+
     iced::application(Example::default, Example::update, Example::view).run()
 }
 
@@ -84,6 +86,8 @@ struct DropZone<'a> {
 struct Offer {
     mime: Option<String>,
     over: bool,
+    /// Dropped here: the data that comes next is ours.
+    claimed: bool,
 }
 
 impl Widget<Message, Theme, iced::Renderer> for DropZone<'_> {
@@ -152,13 +156,14 @@ impl Widget<Message, Theme, iced::Renderer> for DropZone<'_> {
                 hover(offer, *x, *y, shell);
             }
             dnd::Event::Motion { x, y } => hover(offer, *x, *y, shell),
-            dnd::Event::Leave => *offer = Offer::default(),
+            dnd::Event::Leave => offer.over = false,
             dnd::Event::Drop if offer.over => {
                 if let Some(mime) = offer.mime.clone() {
+                    offer.claimed = true;
                     shell.request_dnd_data(mime);
                 }
             }
-            dnd::Event::DataReceived { mime_type, data } if offer.over => {
+            dnd::Event::DataReceived { mime_type, data } if offer.claimed => {
                 shell.publish(Message::Dropped(
                     mime_type.clone(),
                     String::from_utf8_lossy(data).into_owned(),
