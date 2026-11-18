@@ -199,6 +199,8 @@ where
 
     fn selectable_text(&mut self, id: Option<&Id>, bounds: Rectangle, state: &mut dyn Selectable) {
         self.as_mut().selectable_text(id, bounds, state);
+    }
+
     fn accessible(&mut self, id: Option<&Id>, bounds: Rectangle, accessible: &Accessible<'_>) {
         self.as_mut().accessible(id, bounds, accessible);
     }
@@ -311,6 +313,8 @@ where
             state: &mut dyn Selectable,
         ) {
             self.operation.selectable_text(id, bounds, state);
+        }
+
         fn accessible(&mut self, id: Option<&Id>, bounds: Rectangle, accessible: &Accessible<'_>) {
             self.operation.accessible(id, bounds, accessible);
         }
@@ -426,6 +430,8 @@ where
                     state: &mut dyn Selectable,
                 ) {
                     self.operation.selectable_text(id, bounds, state);
+                }
+
                 fn accessible(
                     &mut self,
                     id: Option<&Id>,
@@ -500,6 +506,8 @@ where
             state: &mut dyn Selectable,
         ) {
             self.operation.selectable_text(id, bounds, state);
+        }
+
         fn accessible(&mut self, id: Option<&Id>, bounds: Rectangle, accessible: &Accessible<'_>) {
             self.operation.accessible(id, bounds, accessible);
         }
@@ -612,6 +620,8 @@ where
             state: &mut dyn Selectable,
         ) {
             self.operation.selectable_text(id, bounds, state);
+        }
+
         fn accessible(&mut self, id: Option<&Id>, bounds: Rectangle, accessible: &Accessible<'_>) {
             self.operation.accessible(id, bounds, accessible);
         }

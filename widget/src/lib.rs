@@ -17,6 +17,7 @@ mod focus_order;
 mod gradient_fade;
 mod menu_list;
 mod mouse_area;
+mod accessible;
 mod opacity;
 mod pin;
 mod responsive;
@@ -88,6 +89,7 @@ pub use menu_list::{MenuList, menu_list};
 #[doc(no_inline)]
 pub use mouse_area::MouseArea;
 #[doc(no_inline)]
+pub use accessible::{Accessible, accessible};
 pub use opacity::{Opacity, opacity};
 #[doc(no_inline)]
 pub use pane_grid::PaneGrid;

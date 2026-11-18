@@ -267,6 +267,7 @@ impl<P: Program + 'static> Emulator<P> {
                 runtime::Action::PlatformSpecific(_action) => {
                     // Platform-specific actions not supported in test emulator
                 }
+                runtime::Action::Announce(_) => {}
             },
         }
     }

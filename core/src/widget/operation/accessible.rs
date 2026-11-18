@@ -172,6 +172,9 @@ pub struct Accessible<'a> {
     pub selected: Option<bool>,
     /// Whether a collapsible section is expanded.
     pub expanded: Option<bool>,
+    /// Whether the widget is the current item of its set (ARIA's
+    /// `aria-current`), such as the frontmost window's tile in a taskbar.
+    pub current: bool,
     /// The live-region setting, for widgets whose content changes
     /// should be announced by assistive technology.
     pub live: Option<Live>,

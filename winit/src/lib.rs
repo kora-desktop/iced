@@ -31,7 +31,7 @@ pub mod conversion;
 
 #[cfg(feature = "a11y")]
 #[cfg_attr(docsrs, doc(cfg(feature = "a11y")))]
-pub mod a11y;
+pub use iced_accessibility as a11y;
 
 mod error;
 mod proxy;
@@ -645,14 +645,6 @@ where
 
                                 let window = Arc::new(window);
 
-                                #[cfg(feature = "a11y")]
-                                let adapter = Some(a11y::A11yAdapter::new(
-                                    event_loop,
-                                    window.clone(),
-                                    id,
-                                    &title,
-                                ));
-
                                 self.process_event(
                                     event_loop,
                                     Event::WindowCreated {
@@ -661,8 +653,6 @@ where
                                         exit_on_close_request,
                                         make_visible: visible,
                                         on_open,
-                                        #[cfg(feature = "a11y")]
-                                        adapter,
                                     },
                                 );
                             }
@@ -851,8 +841,6 @@ enum Event<Message: 'static> {
         exit_on_close_request: bool,
         make_visible: bool,
         on_open: oneshot::Sender<window::Id>,
-        #[cfg(feature = "a11y")]
-        adapter: Option<a11y::A11yAdapter>,
     },
     #[cfg(all(
         unix,
@@ -1072,8 +1060,6 @@ async fn run_instance<P>(
                 exit_on_close_request,
                 make_visible,
                 on_open,
-                #[cfg(feature = "a11y")]
-                adapter,
             } => {
                 if compositor.is_none() {
                     let (compositor_sender, compositor_receiver) = oneshot::channel();
@@ -1160,7 +1146,16 @@ async fn run_instance<P>(
 
                 #[cfg(feature = "a11y")]
                 {
-                    window.adapter = adapter;
+                    let wake = std::sync::Mutex::new(proxy.clone());
+                    window.adapter = Some(a11y::Adapter::new(
+                        id,
+                        window.state.title(),
+                        Arc::new(move || {
+                            if let Ok(proxy) = wake.lock() {
+                                proxy.send_action(Action::Tick);
+                            }
+                        }),
+                    ));
                     a11y_tree_dirty = true;
                 }
 
@@ -2097,7 +2092,18 @@ async fn run_instance<P>(
 
                         #[cfg(feature = "a11y")]
                         if let Some(adapter) = &mut window.adapter {
-                            adapter.process_event(&window_event);
+                            match &window_event {
+                                winit::event::WindowEvent::Focused(focused) => {
+                                    adapter.set_focused(*focused);
+                                }
+                                winit::event::WindowEvent::Moved(_)
+                                | winit::event::WindowEvent::Resized(_) => {
+                                    if let Some((outer, inner)) = a11y_window_bounds(&window.raw) {
+                                        adapter.set_bounds(outer, inner);
+                                    }
+                                }
+                                _ => {}
+                            }
                         }
 
                         match window_event {
@@ -2267,7 +2273,7 @@ async fn run_instance<P>(
                                 let bounds = target_entry.map(|(_wid, b)| *b);
 
                                 match action {
-                                    accesskit::Action::Focus => {
+                                    a11y::accesskit::Action::Focus => {
                                         if let Some((widget_id, b)) = target_entry {
                                             if let Some(wid) = widget_id {
                                                 a11y_focus_ops.push((id, wid.clone()));
@@ -2281,7 +2287,7 @@ async fn run_instance<P>(
                                             }
                                         }
                                     }
-                                    accesskit::Action::Click => {
+                                    a11y::accesskit::Action::Click => {
                                         if let Some(bounds) = bounds {
                                             let center = bounds.center();
                                             window.state.set_cursor_position(center);
@@ -2290,7 +2296,7 @@ async fn run_instance<P>(
                                             }
                                         }
                                     }
-                                    accesskit::Action::Increment => {
+                                    a11y::accesskit::Action::Increment => {
                                         if let Some(bounds) = bounds {
                                             let center = bounds.center();
                                             window.state.set_cursor_position(center);
@@ -2302,7 +2308,7 @@ async fn run_instance<P>(
                                             }
                                         }
                                     }
-                                    accesskit::Action::Decrement => {
+                                    a11y::accesskit::Action::Decrement => {
                                         if let Some(bounds) = bounds {
                                             let center = bounds.center();
                                             window.state.set_cursor_position(center);
@@ -2656,6 +2662,15 @@ async fn run_instance<P>(
                             }
 
                             #[cfg(feature = "a11y")]
+                            {
+                                a11y_tree_dirty = true;
+                            }
+                        }
+
+                        #[cfg(feature = "a11y")]
+                        for (_, window) in window_manager.iter_mut() {
+                            if let Some(adapter) = &window.adapter
+                                && adapter.take_activated()
                             {
                                 a11y_tree_dirty = true;
                             }
@@ -4550,4 +4565,26 @@ mod tests {
         );
         assert!(program.poll(&mut context).is_ready());
     }
+}
+
+/// The window's outer frame and content area on screen, in physical pixels.
+#[cfg(feature = "a11y")]
+fn a11y_window_bounds(
+    window: &winit::window::Window,
+) -> Option<(core::Rectangle, core::Rectangle)> {
+    let outer_position = window.outer_position().ok()?;
+    let inner_position = window.inner_position().ok()?;
+    let outer_size = window.outer_size();
+    let inner_size = window.inner_size();
+
+    Some((
+        core::Rectangle::new(
+            core::Point::new(outer_position.x as f32, outer_position.y as f32),
+            core::Size::new(outer_size.width as f32, outer_size.height as f32),
+        ),
+        core::Rectangle::new(
+            core::Point::new(inner_position.x as f32, inner_position.y as f32),
+            core::Size::new(inner_size.width as f32, inner_size.height as f32),
+        ),
+    ))
 }
