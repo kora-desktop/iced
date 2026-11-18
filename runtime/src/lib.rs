@@ -77,6 +77,11 @@ pub enum Action<T> {
 
     /// Run a platform-specific action.
     PlatformSpecific(platform_specific::Action),
+    /// Announce a message to assistive technology via a live region.
+    ///
+    /// The text will be spoken by screen readers using an assertive
+    /// live-region announcement on the next accessibility tree update.
+    Announce(String),
 
     /// Exits the runtime.
     ///
@@ -105,6 +110,7 @@ impl<T> Action<T> {
             Action::Reload => Err(Action::Reload),
             Action::PlatformSpecific(action) => Err(Action::PlatformSpecific(action)),
             Action::Exit => Err(Action::Exit),
+            Action::Announce(text) => Err(Action::Announce(text)),
         }
     }
 }
@@ -138,8 +144,21 @@ where
                 write!(f, "Action::PlatformSpecific({action:?})")
             }
             Action::Exit => write!(f, "Action::Exit"),
+            Action::Announce(text) => {
+                write!(f, "Action::Announce({text:?})")
+            }
         }
     }
+}
+
+/// Creates a [`Task`] that announces the given text to assistive
+/// technology via a live region.
+///
+/// Screen readers will speak the text using an assertive announcement.
+#[cfg(feature = "a11y")]
+#[cfg_attr(docsrs, doc(cfg(feature = "a11y")))]
+pub fn announce<T>(text: impl Into<String>) -> Task<T> {
+    task::effect(Action::Announce(text.into()))
 }
 
 /// Creates a [`Task`] that exits the iced runtime.

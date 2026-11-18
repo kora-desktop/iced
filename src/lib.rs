@@ -542,6 +542,14 @@ pub use crate::program::message;
 pub use crate::runtime::exit;
 pub use iced_futures::Subscription;
 
+#[cfg(feature = "a11y")]
+#[cfg_attr(docsrs, doc(cfg(feature = "a11y")))]
+pub use crate::runtime::announce;
+
+#[cfg(feature = "a11y")]
+#[cfg_attr(docsrs, doc(cfg(feature = "a11y")))]
+pub use iced_accessibility as accessibility;
+
 pub use Alignment::Center;
 pub use Length::{Fill, FillPortion, Shrink, Spacer};
 pub use alignment::Horizontal::{Left, Right};

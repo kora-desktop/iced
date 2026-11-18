@@ -15,6 +15,7 @@ workspace = true
 
 [features]
 default = ["x11", "wayland"]
+a11y = ["dep:iced_accessibility", "iced_program/a11y"]
 debug = ["iced_debug/enable"]
 sysinfo = ["dep:sysinfo"]
 hinting = []
@@ -36,6 +37,8 @@ iced_program.workspace = true
 iced_runtime.workspace = true
 
 log.workspace = true
+iced_accessibility.workspace = true
+iced_accessibility.optional = true
 rustc-hash.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

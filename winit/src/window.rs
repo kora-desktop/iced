@@ -83,6 +83,10 @@ where
                 ime_state: None,
                 ime_surrounding: None,
                 activation_tokens: Vec::new(),
+                #[cfg(feature = "a11y")]
+                adapter: None,
+                #[cfg(feature = "a11y")]
+                a11y_node_map: std::collections::HashMap::new(),
             },
         );
 
@@ -182,6 +186,13 @@ where
         winit::event_loop::AsyncRequestSerial,
         oneshot::Sender<Option<String>>,
     )>,
+    #[cfg(feature = "a11y")]
+    pub adapter: Option<crate::a11y::Adapter>,
+    #[cfg(feature = "a11y")]
+    pub a11y_node_map: std::collections::HashMap<
+        crate::a11y::accesskit::NodeId,
+        (Option<crate::core::widget::Id>, crate::core::Rectangle),
+    >,
 }
 
 impl<P, C> Window<P, C>
