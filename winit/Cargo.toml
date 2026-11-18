@@ -25,11 +25,11 @@ unconditional-rendering = []
 # the compositor from dropping the client when a single frame is slow.
 off-thread-render = []
 linux-theme-detection = ["dep:mundy", "mundy/async-io", "mundy/color-scheme"]
-image = ["iced_runtime/image", "arboard/image-data"]
+image = ["iced_runtime/image", "arboard/image-data", "dep:image"]
 x11 = ["winit/x11"]
 # Lets a test driver on the device read and press widgets, once an admin switches it on
 automation = ["dep:iced_automation"]
-wayland = ["winit/wayland", "winit/wayland-dlopen", "winit/wayland-csd-adwaita", "arboard/wayland-data-control"]
+wayland = ["winit/wayland", "winit/wayland-dlopen", "winit/wayland-csd-adwaita", "arboard/wayland-data-control", "dep:wl-clipboard-rs"]
 
 [dependencies]
 iced_debug.workspace = true
@@ -53,6 +53,15 @@ optional = true
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 arboard.workspace = true
+
+image.workspace = true
+image.optional = true
+image.features = ["png"]
+
+# Offers several MIME types in one clipboard write; arboard has one per write
+[target.'cfg(all(unix, not(any(target_os = "macos", target_os = "android", target_os = "emscripten"))))'.dependencies]
+wl-clipboard-rs.workspace = true
+wl-clipboard-rs.optional = true
 
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 web-sys.workspace = true

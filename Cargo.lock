@@ -2901,6 +2901,7 @@ dependencies = [
  "iced_runtime",
  "iced_test",
  "iced_widget",
+ "image",
  "log",
  "mundy",
  "rustc-hash 2.1.3",
@@ -2910,6 +2911,7 @@ dependencies = [
  "wasm-bindgen-futures",
  "web-sys",
  "winit",
+ "wl-clipboard-rs",
 ]
 
 [[package]]
@@ -6521,6 +6523,14 @@ name = "text_decorations"
 version = "0.1.0"
 dependencies = [
  "iced",
+]
+
+[[package]]
+name = "text_drag"
+version = "0.1.0"
+dependencies = [
+ "iced",
+ "tracing-subscriber",
 ]
 
 [[package]]
