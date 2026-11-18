@@ -22,7 +22,7 @@ use crate::core::{Rectangle, Vector};
 
 use accesskit::{
     ActionHandler, ActionRequest, ActivationHandler, DeactivationHandler, Live, Node, NodeId, Role,
-    Toggled, Tree, TreeId, TreeUpdate,
+    Toggled, TreeId, TreeInfo, TreeUpdate,
 };
 
 use std::collections::HashMap;
@@ -68,7 +68,7 @@ impl ActivationHandler for IcedActivationHandler {
 
         Some(TreeUpdate {
             nodes: vec![(ROOT_ID, node)],
-            tree: Some(Tree::new(ROOT_ID)),
+            tree: Some(TreeInfo::new(ROOT_ID)),
             tree_id: TreeId::ROOT,
             focus: ROOT_ID,
         })
@@ -554,7 +554,7 @@ impl TreeBuilder {
         A11yTree {
             update: TreeUpdate {
                 nodes: self.nodes,
-                tree: Some(Tree::new(ROOT_ID)),
+                tree: Some(TreeInfo::new(ROOT_ID)),
                 tree_id: TreeId::ROOT,
                 focus,
             },
