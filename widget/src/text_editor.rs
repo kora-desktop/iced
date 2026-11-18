@@ -31,8 +31,11 @@
 //!     }
 //! }
 //! ```
+pub mod drag;
+
 use crate::core::alignment;
 use crate::core::clipboard;
+use crate::core::dnd;
 use crate::core::input_method;
 use crate::core::keyboard;
 use crate::core::keyboard::key;
@@ -46,6 +49,7 @@ use crate::core::theme;
 use crate::core::time::{Duration, Instant};
 use crate::core::touch;
 use crate::core::widget::operation;
+use crate::core::widget::operation::accessible::{Accessible, Role, Value};
 use crate::core::widget::{self, Widget};
 use crate::core::window;
 use crate::core::{
@@ -117,10 +121,14 @@ where
     class: Theme::Class<'a>,
     key_binding: Option<Box<dyn Fn(KeyPress) -> Option<Binding<Message>> + 'a>>,
     on_edit: Option<Box<dyn Fn(Action) -> Message + 'a>>,
+    drag_formats: Option<Box<DragFormats<'a>>>,
     highlighter_settings: Highlighter::Settings,
     highlighter_format: fn(&Highlighter::Highlight, &Theme) -> highlighter::Format<Renderer::Font>,
     last_status: Option<Status>,
 }
+
+/// What dragged-out text offers besides itself; see [`TextEditor::drag_formats`].
+type DragFormats<'a> = dyn Fn(&str) -> Vec<(String, Vec<u8>)> + 'a;
 
 impl<'a, Message, Theme, Renderer> TextEditor<'a, highlighter::PlainText, Message, Theme, Renderer>
 where
@@ -146,6 +154,7 @@ where
             class: <Theme as Catalog>::default(),
             key_binding: None,
             on_edit: None,
+            drag_formats: None,
             highlighter_settings: (),
             highlighter_format: |_highlight, _theme| highlighter::Format::default(),
             last_status: None,
@@ -286,10 +295,19 @@ where
             class: self.class,
             key_binding: self.key_binding,
             on_edit: self.on_edit,
+            drag_formats: self.drag_formats,
             highlighter_settings: settings,
             highlighter_format: to_format,
             last_status: self.last_status,
         }
+    }
+
+    /// Sets what selected text offers, besides the text itself, when it is
+    /// dragged out of the editor: MIME types and their data, the preferred
+    /// first. The closure is given the selected text.
+    pub fn drag_formats(mut self, formats: impl Fn(&str) -> Vec<(String, Vec<u8>)> + 'a) -> Self {
+        self.drag_formats = Some(Box::new(formats));
+        self
     }
 
     /// Sets the closure to produce key bindings on key presses.
@@ -319,6 +337,110 @@ where
     pub fn class(mut self, class: impl Into<Theme::Class<'a>>) -> Self {
         self.class = class.into();
         self
+    }
+
+    /// Drives a drag of the selection. Returns whether `event` was the
+    /// drag's, in which case nothing else may handle it.
+    fn drag_selection(
+        &self,
+        state: &mut State<Highlighter>,
+        event: &Event,
+        bounds: Rectangle,
+        cursor: mouse::Cursor,
+        viewport: &Rectangle,
+        shell: &mut Shell<'_, Message>,
+    ) -> bool {
+        let Some(on_edit) = self.on_edit.as_ref() else {
+            return false;
+        };
+
+        let origin = Vector::new(bounds.x + self.padding.left, bounds.y + self.padding.top);
+        let carried = state.drag.is_active() && !state.drag.is_out();
+
+        let outcome = match event {
+            Event::Mouse(mouse::Event::CursorMoved { position }) if carried => {
+                // Out of the area the editor is shown in, it is out of reach.
+                state
+                    .drag
+                    .motion(*position - origin, viewport.contains(*position))
+            }
+            Event::Mouse(mouse::Event::ButtonReleased(mouse::Button::Left))
+                if state.drag.is_active() =>
+            {
+                let (at, over) = cursor
+                    .position()
+                    .map_or((Point::ORIGIN, false), |at| (at, bounds.contains(at)));
+
+                shell.capture_event();
+                state.drag.release(at - origin, over)
+            }
+            Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(key::Named::Escape),
+                ..
+            }) if carried => {
+                shell.capture_event();
+                state.drag.cancel()
+            }
+            Event::Dnd(dnd::Event::Enter { x, y, .. } | dnd::Event::Motion { x, y })
+                if state.drag.is_out() =>
+            {
+                #[allow(clippy::cast_possible_truncation)]
+                let at = Point::new(*x as f32, *y as f32);
+
+                if state.drag.hover(bounds.contains(at).then(|| at - origin)) {
+                    shell.accept_dnd_mime_type(Some(drag::TEXT_MIME_TYPES[0].to_owned()));
+                    shell.set_dnd_actions(drag::ACTIONS, drag::ACTIONS);
+                } else {
+                    shell.accept_dnd_mime_type(None);
+                }
+
+                drag::Outcome::None
+            }
+            Event::Dnd(dnd::Event::Leave) if state.drag.is_out() => {
+                let _ = state.drag.hover(None);
+
+                drag::Outcome::None
+            }
+            Event::Dnd(dnd::Event::Drop) if state.drag.is_out() => {
+                let outcome = state.drag.dropped();
+
+                if outcome != drag::Outcome::None {
+                    // The text is ours already: nothing to read.
+                    shell.finish_dnd();
+                }
+
+                outcome
+            }
+            Event::Dnd(dnd::Event::SourceEvent(event)) if state.drag.is_out() => {
+                state.drag.source_event(*event)
+            }
+            _ => return false,
+        };
+
+        match outcome {
+            drag::Outcome::Click(at) => shell.publish(on_edit(Action::Click(at))),
+            drag::Outcome::Drop(at) => {
+                shell.publish(on_edit(Action::Edit(Edit::MoveSelection(at))));
+            }
+            drag::Outcome::DragOut => match self.content.selection() {
+                Some(text) => {
+                    let formats = self
+                        .drag_formats
+                        .as_ref()
+                        .map(|formats| formats(&text))
+                        .unwrap_or_default();
+                    let (mime_types, data) = drag::offer(&text, formats);
+
+                    shell.start_dnd(mime_types, drag::ACTIONS, data, false);
+                }
+                None => state.drag = drag::Gesture::default(),
+            },
+            drag::Outcome::Cancel | drag::Outcome::None => {}
+        }
+
+        shell.request_redraw();
+
+        true
     }
 
     fn input_method<'b>(
@@ -568,6 +690,7 @@ pub struct State<Highlighter: text::Highlighter> {
     preedit: Option<input_method::Preedit>,
     last_click: Option<mouse::Click>,
     drag_click: Option<mouse::click::Kind>,
+    drag: drag::Gesture,
     partial_scroll: f32,
     last_theme: RefCell<Option<String>>,
     highlighter: RefCell<Highlighter>,
@@ -640,6 +763,7 @@ where
             preedit: None,
             last_click: None,
             drag_click: None,
+            drag: drag::Gesture::default(),
             partial_scroll: 0.0,
             last_theme: RefCell::default(),
             highlighter: RefCell::new(Highlighter::new(&self.highlighter_settings)),
@@ -721,7 +845,7 @@ where
         cursor: mouse::Cursor,
         renderer: &Renderer,
         shell: &mut Shell<'_, Message>,
-        _viewport: &Rectangle,
+        viewport: &Rectangle,
     ) {
         let Some(on_edit) = self.on_edit.as_ref() else {
             return;
@@ -777,6 +901,10 @@ where
             _ => {}
         }
 
+        if self.drag_selection(state, event, layout.bounds(), cursor, viewport, shell) {
+            return;
+        }
+
         if let Some(update) = Update::from_event(
             event,
             state,
@@ -786,6 +914,24 @@ where
             self.key_binding.as_deref(),
         ) {
             match update {
+                Update::Click(click)
+                    if matches!(event, Event::Mouse(_))
+                        && click.kind() == mouse::click::Kind::Single
+                        && state.drag.press(
+                            click.position(),
+                            drag::is_on(
+                                &self.content.0.borrow().editor.selection(),
+                                click.position(),
+                            ),
+                        ) =>
+                {
+                    // Held on the selection: a drag of it, or the click it
+                    // was, once let go.
+                    state.focus = Some(Focus::now());
+                    state.last_click = Some(click);
+                    state.drag_click = None;
+                    shell.capture_event();
+                }
                 Update::Click(click) => {
                     let action = match click.kind() {
                         mouse::click::Kind::Single => Action::Click(click.position()),
@@ -1099,21 +1245,56 @@ where
                 }
             }
         }
+
+        // Where carried text would land.
+        if let Some(at) = state.drag.drop_point()
+            && let Some(caret) = internal.editor.caret_at(at)
+        {
+            let caret = Rectangle::new(
+                caret + translation,
+                Size::new(
+                    if renderer::CRISP {
+                        (1.0 / renderer.scale_factor().unwrap_or(1.0)).max(1.0)
+                    } else {
+                        1.0
+                    },
+                    self.line_height.to_absolute(text_size).into(),
+                ),
+            );
+
+            if let Some(caret) = text_bounds.intersection(&caret) {
+                renderer.fill_quad(
+                    renderer::Quad {
+                        bounds: caret,
+                        ..renderer::Quad::default()
+                    },
+                    style.caret.unwrap_or(style.value),
+                );
+            }
+        }
     }
 
     fn mouse_interaction(
         &self,
-        _tree: &widget::Tree,
+        tree: &widget::Tree,
         layout: Layout<'_>,
         cursor: mouse::Cursor,
         _viewport: &Rectangle,
         _renderer: &Renderer,
     ) -> mouse::Interaction {
         let is_disabled = self.on_edit.is_none();
+        let state = tree.state.downcast_ref::<State<Highlighter>>();
 
-        if cursor.is_over(layout.bounds()) {
+        if state.drag.drop_point().is_some() {
+            mouse::Interaction::Grabbing
+        } else if let Some(at) = cursor.position_in(layout.bounds()) {
+            let at = at - Vector::new(self.padding.left, self.padding.top);
+
             if is_disabled {
                 mouse::Interaction::NotAllowed
+            } else if drag::is_on(&self.content.0.borrow().editor.selection(), at) {
+                // Selected text is taken hold of, not typed into.
+                mouse::Interaction::Idle
             } else {
                 mouse::Interaction::Text
             }
@@ -1130,6 +1311,21 @@ where
         operation: &mut dyn widget::Operation,
     ) {
         let state = tree.state.downcast_mut::<State<Highlighter>>();
+
+        let label = self.placeholder.as_deref();
+        let text = self.content.text();
+
+        operation.accessible(
+            self.id.as_ref(),
+            layout.bounds(),
+            &Accessible {
+                role: Role::MultilineTextInput,
+                label,
+                value: Some(Value::Text(&text)),
+                disabled: self.on_edit.is_none(),
+                ..Accessible::default()
+            },
+        );
 
         operation.focusable(self.id.as_ref(), layout.bounds(), state);
 
