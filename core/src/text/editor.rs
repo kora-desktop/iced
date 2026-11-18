@@ -32,6 +32,12 @@ pub trait Editor: Sized + Default {
     /// Returns the amount of lines in the [`Editor`].
     fn line_count(&self) -> usize;
 
+    /// Returns where the caret would be if the [`Editor`] were clicked at
+    /// the given [`Point`], to show where dropped text would land.
+    fn caret_at(&self, _point: Point) -> Option<Point> {
+        None
+    }
+
     /// Performs an [`Action`] on the [`Editor`].
     fn perform(&mut self, action: Action);
 
@@ -132,6 +138,9 @@ pub enum Edit {
     Undo,
     /// Redo the last undone change.
     Redo,
+    /// Move the selected text to the given [`Point`] as one change, as a drag
+    /// and drop does. A point on the selection leaves it where it is.
+    MoveSelection(Point),
 }
 
 /// A cursor movement.

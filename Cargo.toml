@@ -83,6 +83,8 @@ advanced-auto-shaping = ["iced_core/advanced-auto-shaping"]
 hinting = ["iced_winit/hinting"]
 # Enables strict assertions for debugging purposes at the expense of performance
 strict-assertions = ["iced_renderer/strict-assertions"]
+# Enables accessibility support via accesskit
+a11y = ["iced_winit/a11y", "dep:iced_accessibility"]
 # Redraws on every runtime event, and not only when a widget requests it
 unconditional-rendering = ["iced_winit/unconditional-rendering"]
 # Experimental: drive the program on a worker thread (off the platform thread)
@@ -100,6 +102,8 @@ wayland = ["iced_renderer/wayland", "iced_winit/wayland"]
 
 [dependencies]
 iced_debug.workspace = true
+iced_accessibility.workspace = true
+iced_accessibility.optional = true
 iced_core.workspace = true
 iced_futures.workspace = true
 iced_renderer.workspace = true
@@ -160,6 +164,7 @@ members = [
     "wgpu",
     "widget",
     "winit",
+    "accessibility",
     "examples/*",
 ]
 
@@ -176,6 +181,7 @@ rust-version = "1.92"
 
 [workspace.dependencies]
 iced = { version = "0.15.0-dev", path = "." }
+iced_accessibility = { version = "0.15.0-dev", path = "accessibility" }
 iced_automation = { version = "0.15.0-dev", path = "automation" }
 iced_beacon = { version = "0.15.0-dev", path = "beacon" }
 iced_core = { version = "0.15.0-dev", path = "core" }
@@ -195,6 +201,8 @@ iced_wgpu = { version = "0.15.0-dev", path = "wgpu", default-features = false }
 iced_widget = { version = "0.15.0-dev", path = "widget" }
 iced_winit = { version = "0.15.0-dev", path = "winit", default-features = false }
 
+accesskit = { git = "https://github.com/kora-desktop/accesskit", rev = "f76c3b3d4f2719d82a9b3629521ced012bdb59b8" }
+accesskit_unix = { git = "https://github.com/kora-desktop/accesskit", rev = "f76c3b3d4f2719d82a9b3629521ced012bdb59b8" }
 arboard = { version = "3.6", default-features = false }
 bincode = "1.3"
 bitflags = "2.0"
@@ -250,6 +258,7 @@ web-time = "1.1"
 wgpu = { git = "https://github.com/playtron-os/wgpu.git", rev = "1b9a82c33", default-features = false, features = ["std", "wgsl"] }
 #winit = { path = "../winit", default-features = false, features = ["rwh_06"] }
 winit = { git = "https://github.com/playtron-os/winit.git", rev = "bd599a62d9ed8a87505b8830ff5875b571995506", default-features = false, features = ["rwh_06"] }
+wl-clipboard-rs = "0.9"
 
 [workspace.lints.rust]
 rust_2018_idioms = { level = "deny", priority = -1 }

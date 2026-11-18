@@ -9,6 +9,7 @@ pub use iced_renderer::graphics;
 
 pub use core::widget::Id;
 
+mod accessible;
 mod action;
 mod auto_focus;
 mod backdrop_blur;
@@ -63,6 +64,8 @@ mod lazy;
 pub use crate::lazy::helpers::*;
 
 #[doc(no_inline)]
+pub use accessible::{Accessible, accessible};
+#[doc(no_inline)]
 pub use auto_focus::{AutoFocus, auto_focus};
 #[doc(no_inline)]
 pub use backdrop_blur::{BackdropBlur, backdrop_blur};
@@ -87,7 +90,6 @@ pub use grid::Grid;
 pub use menu_list::{MenuList, menu_list};
 #[doc(no_inline)]
 pub use mouse_area::MouseArea;
-#[doc(no_inline)]
 pub use opacity::{Opacity, opacity};
 #[doc(no_inline)]
 pub use pane_grid::PaneGrid;

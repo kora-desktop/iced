@@ -1,5 +1,5 @@
 //! Access the clipboard.
-use crate::core::clipboard::{Content, Error, Kind};
+use crate::core::clipboard::{Content, Error, Format, Kind};
 
 pub use platform::*;
 
@@ -63,6 +63,11 @@ mod platform {
                     return;
                 };
 
+                if let Kind::Mime(mime) = kind {
+                    callback(read_format(&mut clipboard, mime));
+                    return;
+                }
+
                 let get = clipboard.get();
 
                 let result = match kind {
@@ -109,6 +114,11 @@ mod platform {
                     callback(Err(Error::ClipboardUnavailable));
                     return;
                 };
+
+                if let Content::Formats(formats) = content {
+                    callback(write_formats(&mut clipboard, &formats));
+                    return;
+                }
 
                 let set = clipboard.set();
 
@@ -226,6 +236,80 @@ mod platform {
         }
     }
 
+    /// Offers every format under its MIME type through Wayland data control.
+    ///
+    /// Elsewhere, and on compositors without data control, only one
+    /// representation survives, the first that exists of: HTML (with the
+    /// plain text next to it), plain text, then a PNG (with the `image`
+    /// feature). Other types are dropped.
+    fn write_formats(clipboard: &mut arboard::Clipboard, formats: &[Format]) -> Result<(), Error> {
+        #[cfg(all(
+            feature = "wayland",
+            unix,
+            not(any(target_os = "macos", target_os = "android", target_os = "emscripten"))
+        ))]
+        if let Some(result) = super::data_control::write(formats) {
+            return result;
+        }
+
+        let set = clipboard.set();
+
+        match super::fallback(formats)? {
+            super::Fallback::Html { html, alt } => set.html(html, alt),
+            super::Fallback::Text(text) => set.text(text),
+            #[cfg(feature = "image")]
+            super::Fallback::Png(png) => {
+                let image = super::decode_png(png)?;
+
+                set.image(arboard::ImageData {
+                    width: image.width() as usize,
+                    height: image.height() as usize,
+                    bytes: image.into_raw().into(),
+                })
+            }
+        }
+        .map_err(to_error)
+    }
+
+    /// Reads the content offered under `mime` through Wayland data control.
+    ///
+    /// Elsewhere only plain text, HTML and (with the `image` feature) PNG can
+    /// be read, converted from what the platform holds.
+    fn read_format(
+        clipboard: &mut arboard::Clipboard,
+        mime: &'static str,
+    ) -> Result<Content, Error> {
+        #[cfg(all(
+            feature = "wayland",
+            unix,
+            not(any(target_os = "macos", target_os = "android", target_os = "emscripten"))
+        ))]
+        if let Some(result) = super::data_control::read(mime) {
+            return result.map(|data| Content::Formats(vec![Format::new(mime, data)]));
+        }
+
+        let get = clipboard.get();
+
+        let data = if crate::core::clipboard::is_text_mime(mime) {
+            get.text().map(crate::core::Bytes::from)
+        } else if mime == Format::HTML {
+            get.html().map(crate::core::Bytes::from)
+        } else {
+            #[cfg(feature = "image")]
+            if mime == Format::PNG {
+                let image = get.image().map_err(to_error)?;
+
+                return super::encode_png(image.width, image.height, image.bytes.into_owned())
+                    .map(|png| Content::Formats(vec![Format::new(mime, png)]));
+            }
+
+            Err(arboard::Error::ContentNotAvailable)
+        }
+        .map_err(to_error)?;
+
+        Ok(Content::Formats(vec![Format::new(mime, data)]))
+    }
+
     fn to_error(error: arboard::Error) -> Error {
         match error {
             arboard::Error::ContentNotAvailable => Error::ContentNotAvailable,
@@ -239,6 +323,270 @@ mod platform {
                 description: Arc::new(error.to_string()),
             },
         }
+    }
+}
+
+/// The one representation a clipboard without MIME offers keeps.
+#[cfg(not(target_arch = "wasm32"))]
+#[derive(Debug, PartialEq)]
+enum Fallback {
+    Html {
+        html: String,
+        alt: Option<String>,
+    },
+    Text(String),
+    #[cfg(feature = "image")]
+    Png(crate::core::Bytes),
+}
+
+#[cfg(not(target_arch = "wasm32"))]
+fn fallback(formats: &[Format]) -> Result<Fallback, Error> {
+    let find = |mime: &str| formats.iter().find(|format| format.mime == mime);
+    let utf8 = |format: &Format| {
+        format
+            .as_str()
+            .map(str::to_owned)
+            .ok_or(Error::ConversionFailure)
+    };
+
+    let text = formats
+        .iter()
+        .find(|format| format.is_text())
+        .map(utf8)
+        .transpose()?;
+
+    if let Some(html) = find(Format::HTML) {
+        return Ok(Fallback::Html {
+            html: utf8(html)?,
+            alt: text,
+        });
+    }
+
+    if let Some(text) = text {
+        return Ok(Fallback::Text(text));
+    }
+
+    #[cfg(feature = "image")]
+    if let Some(png) = find(Format::PNG) {
+        return Ok(Fallback::Png(png.data.clone()));
+    }
+
+    Err(Error::ContentNotAvailable)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "image"))]
+fn decode_png(png: crate::core::Bytes) -> Result<image::RgbaImage, Error> {
+    image::load_from_memory_with_format(&png, image::ImageFormat::Png)
+        .map(image::DynamicImage::into_rgba8)
+        .map_err(|_| Error::ConversionFailure)
+}
+
+#[cfg(all(not(target_arch = "wasm32"), feature = "image"))]
+fn encode_png(width: usize, height: usize, rgba: Vec<u8>) -> Result<crate::core::Bytes, Error> {
+    let image = image::RgbaImage::from_raw(width as u32, height as u32, rgba)
+        .ok_or(Error::ConversionFailure)?;
+    let mut png = std::io::Cursor::new(Vec::new());
+
+    image
+        .write_to(&mut png, image::ImageFormat::Png)
+        .map_err(|_| Error::ConversionFailure)?;
+
+    Ok(png.into_inner().into())
+}
+
+/// Several MIME types in one write, through the data control protocols.
+///
+/// Each call returns `None` where data control is out of reach (not a Wayland
+/// session, or a compositor without it), so the caller falls back.
+#[cfg(all(
+    feature = "wayland",
+    unix,
+    not(any(target_os = "macos", target_os = "android", target_os = "emscripten"))
+))]
+mod data_control {
+    use super::{Error, Format};
+    use crate::core::Bytes;
+    use crate::core::clipboard::is_text_mime;
+
+    use std::io::Read;
+    use std::sync::Arc;
+    use wl_clipboard_rs::{copy, paste};
+
+    pub fn write(formats: &[Format]) -> Option<Result<(), Error>> {
+        let _wayland = std::env::var_os("WAYLAND_DISPLAY")?;
+
+        let mut options = copy::Options::new();
+        let _ = options.clipboard(copy::ClipboardType::Regular);
+
+        match options.copy_multi(sources(formats)) {
+            Ok(()) => Some(Ok(())),
+            Err(
+                copy::Error::WaylandConnection(_)
+                | copy::Error::MissingProtocol { .. }
+                | copy::Error::NoSeats,
+            ) => None,
+            Err(error) => Some(Err(unknown(error))),
+        }
+    }
+
+    pub fn read(mime: &str) -> Option<Result<Bytes, Error>> {
+        let _wayland = std::env::var_os("WAYLAND_DISPLAY")?;
+
+        let wanted = if is_text_mime(mime) {
+            paste::MimeType::Text
+        } else {
+            paste::MimeType::Specific(mime)
+        };
+
+        match paste::get_contents(
+            paste::ClipboardType::Regular,
+            paste::Seat::Unspecified,
+            wanted,
+        ) {
+            Ok((mut pipe, _)) => {
+                let mut data = Vec::new();
+
+                Some(
+                    pipe.read_to_end(&mut data)
+                        .map(|_| Bytes::from(data))
+                        .map_err(unknown),
+                )
+            }
+            Err(paste::Error::ClipboardEmpty | paste::Error::NoMimeType) => {
+                Some(Err(Error::ContentNotAvailable))
+            }
+            Err(
+                paste::Error::WaylandConnection(_)
+                | paste::Error::MissingProtocol { .. }
+                | paste::Error::NoSeats,
+            ) => None,
+            Err(error) => Some(Err(unknown(error))),
+        }
+    }
+
+    /// One source per MIME type, the first of each winning. Plain text is
+    /// offered under every common text type, so older readers find it.
+    pub(super) fn sources(formats: &[Format]) -> Vec<copy::MimeSource> {
+        let mut seen: Vec<&str> = Vec::with_capacity(formats.len());
+        let mut text = false;
+
+        formats
+            .iter()
+            .filter_map(|format| {
+                let mime_type = if format.is_text() {
+                    if std::mem::replace(&mut text, true) {
+                        return None;
+                    }
+
+                    copy::MimeType::Text
+                } else if seen.contains(&format.mime.as_str()) {
+                    return None;
+                } else {
+                    seen.push(&format.mime);
+
+                    copy::MimeType::Specific(format.mime.clone())
+                };
+
+                Some(copy::MimeSource {
+                    source: copy::Source::Bytes(format.data.to_vec().into_boxed_slice()),
+                    mime_type,
+                })
+            })
+            .collect()
+    }
+
+    fn unknown(error: impl std::fmt::Display) -> Error {
+        Error::Unknown {
+            description: Arc::new(error.to_string()),
+        }
+    }
+}
+
+#[cfg(all(test, not(target_arch = "wasm32")))]
+mod tests {
+    use super::*;
+
+    fn custom() -> Format {
+        Format::new("application/x-example+json", b"{\"id\":1}".as_slice())
+    }
+
+    #[test]
+    fn the_fallback_keeps_html_with_its_plain_text() {
+        let formats = [custom(), Format::text("plain"), Format::html("<b>rich</b>")];
+
+        assert_eq!(
+            fallback(&formats),
+            Ok(Fallback::Html {
+                html: "<b>rich</b>".to_owned(),
+                alt: Some("plain".to_owned()),
+            })
+        );
+    }
+
+    #[test]
+    fn the_fallback_keeps_plain_text_over_an_image() {
+        let formats = [Format::png(b"not read".as_slice()), Format::text("plain")];
+
+        assert_eq!(fallback(&formats), Ok(Fallback::Text("plain".to_owned())));
+    }
+
+    #[test]
+    fn the_fallback_refuses_text_that_is_not_utf8() {
+        let formats = [Format::new("text/plain", b"\xff\xfe".as_slice())];
+
+        assert_eq!(fallback(&formats), Err(Error::ConversionFailure));
+    }
+
+    #[test]
+    fn a_custom_type_alone_has_no_fallback() {
+        assert_eq!(fallback(&[custom()]), Err(Error::ContentNotAvailable));
+    }
+
+    #[cfg(feature = "image")]
+    #[test]
+    fn the_fallback_keeps_a_png_when_there_is_no_text() {
+        let png = encode_png(1, 1, vec![255, 0, 0, 255]).expect("encode");
+        let Ok(Fallback::Png(kept)) = fallback(&[custom(), Format::png(png.clone())]) else {
+            panic!("expected the PNG");
+        };
+
+        assert_eq!(
+            decode_png(kept).expect("decode").into_raw(),
+            vec![255, 0, 0, 255]
+        );
+    }
+
+    #[cfg(all(
+        feature = "wayland",
+        unix,
+        not(any(target_os = "macos", target_os = "android", target_os = "emscripten"))
+    ))]
+    #[test]
+    fn data_control_offers_each_type_once_and_text_under_every_text_type() {
+        use wl_clipboard_rs::copy::MimeType;
+
+        let formats = [
+            Format::text("first"),
+            Format::html("<p>"),
+            Format::new("text/plain;charset=utf-8", "second"),
+            Format::html("<p>again"),
+            custom(),
+        ];
+        let sources = data_control::sources(&formats);
+        let types: Vec<_> = sources.iter().map(|source| &source.mime_type).collect();
+
+        assert_eq!(
+            types,
+            [
+                &MimeType::Text,
+                &MimeType::Specific("text/html".to_owned()),
+                &MimeType::Specific("application/x-example+json".to_owned()),
+            ]
+        );
+        assert_eq!(
+            sources[0].source,
+            wl_clipboard_rs::copy::Source::Bytes(b"first".to_vec().into_boxed_slice())
+        );
     }
 }
 

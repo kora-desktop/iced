@@ -1,10 +1,12 @@
 //! Query or update internal widget state.
+pub mod accessible;
 pub mod auto_focusable;
 pub mod focusable;
 pub mod scrollable;
 pub mod selection;
 pub mod text_input;
 
+pub use accessible::Accessible;
 pub use focusable::{FocusGroup, Focusable};
 pub use scrollable::Scrollable;
 pub use selection::Selectable;
@@ -113,6 +115,22 @@ pub trait Operation<T = ()>: Send {
         _state: &mut dyn Selectable,
     ) {
     }
+    /// Operates on a widget that exposes accessibility metadata.
+    ///
+    /// Widgets with semantic roles, labels, values, or interactive
+    /// states call this to make themselves visible to assistive
+    /// technology. Purely structural containers (grouping children
+    /// without semantic meaning) can rely on [`container`](Self::container)
+    /// alone.
+    ///
+    /// When a widget also calls [`focusable`](Self::focusable) or
+    /// [`text`](Self::text), `accessible` **must** be called first so
+    /// that tree builders can associate focus state and text content
+    /// with the correct accessible node.
+    ///
+    /// For a guide to making widgets accessible, see
+    /// `docs/a11y-widget-guide.md` in the repository.
+    fn accessible(&mut self, _id: Option<&Id>, _bounds: Rectangle, _accessible: &Accessible<'_>) {}
 
     /// Operates on a custom widget with some state.
     fn custom(&mut self, _id: Option<&Id>, _bounds: Rectangle, _state: &mut dyn Any) {}
@@ -181,6 +199,10 @@ where
 
     fn selectable_text(&mut self, id: Option<&Id>, bounds: Rectangle, state: &mut dyn Selectable) {
         self.as_mut().selectable_text(id, bounds, state);
+    }
+
+    fn accessible(&mut self, id: Option<&Id>, bounds: Rectangle, accessible: &Accessible<'_>) {
+        self.as_mut().accessible(id, bounds, accessible);
     }
 
     fn custom(&mut self, id: Option<&Id>, bounds: Rectangle, state: &mut dyn Any) {
@@ -291,6 +313,10 @@ where
             state: &mut dyn Selectable,
         ) {
             self.operation.selectable_text(id, bounds, state);
+        }
+
+        fn accessible(&mut self, id: Option<&Id>, bounds: Rectangle, accessible: &Accessible<'_>) {
+            self.operation.accessible(id, bounds, accessible);
         }
 
         fn custom(&mut self, id: Option<&Id>, bounds: Rectangle, state: &mut dyn Any) {
@@ -406,6 +432,15 @@ where
                     self.operation.selectable_text(id, bounds, state);
                 }
 
+                fn accessible(
+                    &mut self,
+                    id: Option<&Id>,
+                    bounds: Rectangle,
+                    accessible: &Accessible<'_>,
+                ) {
+                    self.operation.accessible(id, bounds, accessible);
+                }
+
                 fn custom(&mut self, id: Option<&Id>, bounds: Rectangle, state: &mut dyn Any) {
                     self.operation.custom(id, bounds, state);
                 }
@@ -471,6 +506,10 @@ where
             state: &mut dyn Selectable,
         ) {
             self.operation.selectable_text(id, bounds, state);
+        }
+
+        fn accessible(&mut self, id: Option<&Id>, bounds: Rectangle, accessible: &Accessible<'_>) {
+            self.operation.accessible(id, bounds, accessible);
         }
 
         fn custom(&mut self, id: Option<&Id>, bounds: Rectangle, state: &mut dyn Any) {
@@ -581,6 +620,10 @@ where
             state: &mut dyn Selectable,
         ) {
             self.operation.selectable_text(id, bounds, state);
+        }
+
+        fn accessible(&mut self, id: Option<&Id>, bounds: Rectangle, accessible: &Accessible<'_>) {
+            self.operation.accessible(id, bounds, accessible);
         }
 
         fn custom(&mut self, id: Option<&Id>, bounds: Rectangle, state: &mut dyn Any) {

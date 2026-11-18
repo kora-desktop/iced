@@ -150,6 +150,17 @@ impl editor::Editor for Editor {
         self.buffer().lines.len()
     }
 
+    fn caret_at(&self, point: Point) -> Option<Point> {
+        let internal = self.internal();
+        let buffer = buffer_from_editor(&internal.editor);
+        let cursor = buffer.hit(
+            point.x * internal.hint_factor,
+            point.y * internal.hint_factor,
+        )?;
+
+        Some(caret_point(buffer, cursor, internal.hint_factor))
+    }
+
     fn copy(&self) -> Option<String> {
         self.internal().editor.copy_selection()
     }
@@ -209,65 +220,7 @@ impl editor::Editor for Editor {
 
                 Selection::Range(regions)
             }
-            _ => {
-                // A line laid out again off screen has no layout until it is
-                // shaped: measure it as an empty line rather than panic.
-                let layout = buffer
-                    .lines
-                    .get(cursor.line)
-                    .and_then(cosmic_text::BufferLine::layout_opt)
-                    .map(Vec::as_slice)
-                    .unwrap_or_default();
-
-                let mut lines = layout.iter().enumerate();
-
-                let (visual_line, offset) = lines
-                    .find_map(|(i, line)| {
-                        let start = line.glyphs.first().map(|glyph| glyph.start).unwrap_or(0);
-                        let end = line.glyphs.last().map(|glyph| glyph.end).unwrap_or(0);
-
-                        let is_cursor_before_start = start > cursor.index;
-
-                        let is_cursor_before_end = match cursor.affinity {
-                            cosmic_text::Affinity::Before => cursor.index <= end,
-                            cosmic_text::Affinity::After => cursor.index < end,
-                        };
-
-                        if is_cursor_before_start {
-                            // Sometimes, the glyph we are looking for is right
-                            // between lines. This can happen when a line wraps
-                            // on a space.
-                            // In that case, we can assume the cursor is at the
-                            // end of the previous line.
-                            // i is guaranteed to be > 0 because `start` is always
-                            // 0 for the first line, so there is no way for the
-                            // cursor to be before it.
-                            Some((i - 1, layout[i - 1].w))
-                        } else if is_cursor_before_end {
-                            let offset = line
-                                .glyphs
-                                .iter()
-                                .take_while(|glyph| cursor.index > glyph.start)
-                                .map(|glyph| glyph.w)
-                                .sum();
-
-                            Some((i, offset))
-                        } else {
-                            None
-                        }
-                    })
-                    .unwrap_or((
-                        layout.len().saturating_sub(1),
-                        layout.last().map(|line| line.w).unwrap_or(0.0),
-                    ));
-
-                let (y, _) = visual_line_bounds(buffer, cursor.line, visual_line);
-
-                Selection::Caret(Point::new(
-                    offset / internal.hint_factor,
-                    y / internal.hint_factor,
-                ))
-            }
+            _ => Selection::Caret(caret_point(buffer, cursor, internal.hint_factor)),
         };
 
         *internal.selection.write().expect("Write to cursor cache") = Some(cursor.clone());
@@ -434,6 +387,14 @@ impl editor::Editor for Editor {
                         }
                         Edit::Redo => {
                             editor.action(font_system.raw(), cosmic_text::Action::Redo);
+                        }
+                        Edit::MoveSelection(point) => {
+                            move_selection(
+                                editor,
+                                font_system.raw(),
+                                point.x * internal.hint_factor,
+                                point.y * internal.hint_factor,
+                            );
                         }
                     }
 
@@ -1020,6 +981,134 @@ fn to_motion(motion: Motion) -> cosmic_text::Motion {
     }
 }
 
+/// Where the caret is drawn for `cursor`, in logical pixels.
+fn caret_point(
+    buffer: &cosmic_text::Buffer,
+    cursor: cosmic_text::Cursor,
+    hint_factor: f32,
+) -> Point {
+    // A line laid out again off screen has no layout until it is
+    // shaped: measure it as an empty line rather than panic.
+    let layout = buffer
+        .lines
+        .get(cursor.line)
+        .and_then(cosmic_text::BufferLine::layout_opt)
+        .map(Vec::as_slice)
+        .unwrap_or_default();
+
+    let mut lines = layout.iter().enumerate();
+
+    let (visual_line, offset) = lines
+        .find_map(|(i, line)| {
+            let start = line.glyphs.first().map(|glyph| glyph.start).unwrap_or(0);
+            let end = line.glyphs.last().map(|glyph| glyph.end).unwrap_or(0);
+
+            let is_cursor_before_start = start > cursor.index;
+
+            let is_cursor_before_end = match cursor.affinity {
+                cosmic_text::Affinity::Before => cursor.index <= end,
+                cosmic_text::Affinity::After => cursor.index < end,
+            };
+
+            if is_cursor_before_start {
+                // Sometimes, the glyph we are looking for is right
+                // between lines. This can happen when a line wraps
+                // on a space.
+                // In that case, we can assume the cursor is at the
+                // end of the previous line.
+                // i is guaranteed to be > 0 because `start` is always
+                // 0 for the first line, so there is no way for the
+                // cursor to be before it.
+                Some((i - 1, layout[i - 1].w))
+            } else if is_cursor_before_end {
+                let offset = line
+                    .glyphs
+                    .iter()
+                    .take_while(|glyph| cursor.index > glyph.start)
+                    .map(|glyph| glyph.w)
+                    .sum();
+
+                Some((i, offset))
+            } else {
+                None
+            }
+        })
+        .unwrap_or((
+            layout.len().saturating_sub(1),
+            layout.last().map(|line| line.w).unwrap_or(0.0),
+        ));
+
+    let (y, _) = visual_line_bounds(buffer, cursor.line, visual_line);
+
+    Point::new(offset / hint_factor, y / hint_factor)
+}
+
+/// Moves the selection to the text at `(x, y)`, in physical pixels, as one
+/// change: the span from the selection to the target is pasted over in its
+/// new order, so a single undo puts it back. The moved text stays selected.
+fn move_selection(
+    editor: &mut cosmic_text::Editor<'static>,
+    font_system: &mut cosmic_text::FontSystem,
+    x: f32,
+    y: f32,
+) {
+    let Some((start, end)) = editor.selection_bounds() else {
+        return;
+    };
+    let Some(target) = buffer_from_editor(editor).hit(x, y) else {
+        return;
+    };
+    let key = |c: cosmic_text::Cursor| (c.line, c.index);
+    if key(target) >= key(start) && key(target) <= key(end) {
+        return;
+    }
+    let Some(moved) = editor.copy_selection() else {
+        return;
+    };
+    let mut text_between = |from: cosmic_text::Cursor, to: cosmic_text::Cursor| {
+        editor.set_cursor(to);
+        editor.set_selection(cosmic_text::Selection::Normal(from));
+        editor.copy_selection().unwrap_or_default()
+    };
+    let before = key(target) < key(start);
+    let (low, high, between) = if before {
+        (target, end, text_between(target, start))
+    } else {
+        (start, target, text_between(end, target))
+    };
+    let replacement = if before {
+        format!("{moved}{between}")
+    } else {
+        format!("{between}{moved}")
+    };
+    editor.set_cursor(high);
+    editor.set_selection(cosmic_text::Selection::Normal(low));
+    editor.action(font_system, cosmic_text::Action::Paste(replacement));
+    let (from, to) = if before {
+        (low, advance(low, &moved))
+    } else {
+        (advance(low, &between), editor.cursor())
+    };
+    editor.set_cursor(to);
+    editor.set_selection(cosmic_text::Selection::Normal(from));
+}
+
+/// The cursor after `text` is inserted at `cursor`, its lines split on `\n`
+/// as [`cosmic_text::Editor::copy_selection`] joins them.
+fn advance(cursor: cosmic_text::Cursor, text: &str) -> cosmic_text::Cursor {
+    match text.rsplit_once('\n') {
+        Some((head, last)) => cosmic_text::Cursor {
+            line: cursor.line + head.matches('\n').count() + 1,
+            index: last.len(),
+            ..cursor
+        },
+        None => cosmic_text::Cursor {
+            index: cursor.index + text.len(),
+            ..cursor
+        },
+    }
+}
+
 fn buffer_from_editor<'a, 'b>(editor: &'a impl cosmic_text::Edit<'b>) -> &'a cosmic_text::Buffer
 where
     'b: 'a,
@@ -1235,6 +1324,64 @@ mod tests {
             Selection::Caret(at) => at,
             Selection::Range(_) => panic!("nothing is selected"),
         }
+    }
+
+    /// "one two three" over "four", laid out, with the first `select`
+    /// characters selected from `from`.
+    fn selected(from: Motion, motion: Motion, select: usize) -> Editor {
+        let mut editor = Editor::with_text("one two three\nfour");
+        editor.update(
+            Size::new(WIDE, 10.0 * LINE_HEIGHT),
+            Font::DEFAULT,
+            Pixels(14.0),
+            LineHeight::Absolute(Pixels(LINE_HEIGHT)),
+            Wrapping::WordOrGlyph,
+            None,
+            &mut PlainText::new(&()),
+        );
+        editor.perform(Action::Move(from));
+        for _ in 0..select {
+            editor.perform(Action::Select(motion));
+        }
+        editor
+    }
+
+    fn text(editor: &Editor) -> String {
+        (0..editor.line_count())
+            .filter_map(|i| editor.line(i).map(|l| l.text.into_owned()))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    #[test]
+    fn a_dropped_selection_moves_as_one_change_and_stays_selected() {
+        let mut editor = selected(Motion::DocumentStart, Motion::Right, 4);
+        assert_eq!(editor.copy().as_deref(), Some("one "));
+        // Past the end of the second line: after "four".
+        let end = Point::new(WIDE - 1.0, LINE_HEIGHT * 1.5);
+        assert!(
+            editor
+                .caret_at(end)
+                .is_some_and(|at| at.y >= LINE_HEIGHT - 0.5)
+        );
+        editor.perform(Action::Edit(Edit::MoveSelection(end)));
+        assert_eq!(text(&editor), "two three\nfourone ");
+        assert_eq!(editor.copy().as_deref(), Some("one "));
+        editor.perform(Action::Edit(Edit::Undo));
+        assert_eq!(text(&editor), "one two three\nfour");
+    }
+
+    #[test]
+    fn a_selection_dropped_before_itself_or_on_itself() {
+        let mut editor = selected(Motion::DocumentEnd, Motion::Left, 4);
+        assert_eq!(editor.copy().as_deref(), Some("four"));
+        editor.perform(Action::Edit(Edit::MoveSelection(Point::new(0.0, 5.0))));
+        assert_eq!(text(&editor), "fourone two three\n");
+        assert_eq!(editor.copy().as_deref(), Some("four"));
+        editor.perform(Action::Edit(Edit::MoveSelection(Point::new(2.0, 5.0))));
+        assert_eq!(text(&editor), "fourone two three\n", "dropped on itself");
+        editor.perform(Action::Edit(Edit::Undo));
+        assert_eq!(text(&editor), "one two three\nfour");
     }
 
     #[test]
