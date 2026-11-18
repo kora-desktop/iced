@@ -1,5 +1,6 @@
 //! Access the clipboard.
-use crate::core::clipboard::{Content, Error, Kind};
+use crate::core::Bytes;
+use crate::core::clipboard::{Content, Error, Format, Kind};
 use crate::futures::futures::channel::oneshot;
 use crate::task::{self, Task};
 
@@ -148,4 +149,65 @@ pub fn write(content: impl Into<Content>) -> Task<Result<(), Error>> {
     let content = content.into();
 
     task::oneshot(|channel| crate::Action::Clipboard(Action::Write { content, channel }))
+}
+
+/// Write the same content in several [`Format`]s at once.
+///
+/// Every format is offered under its MIME type, and a reader takes the one it
+/// understands: plain text for any app, next to HTML, a PNG or an app's own
+/// type. Put [`Format::text`] in whenever there is a text form, since that is
+/// what backends without MIME offers keep.
+pub fn write_formats(formats: impl IntoIterator<Item = Format>) -> Task<Result<(), Error>> {
+    write(Content::Formats(formats.into_iter().collect()))
+}
+
+/// Read the clipboard content offered under the given MIME type.
+///
+/// Yields [`Error::ContentNotAvailable`] when the clipboard offers no such
+/// type.
+pub fn read_format(mime: &'static str) -> Task<Result<Bytes, Error>> {
+    task::oneshot(move |channel| {
+        crate::Action::Clipboard(Action::Read {
+            kind: Kind::Mime(mime),
+            channel,
+        })
+    })
+    .map(move |result| format_data(result?, mime))
+}
+
+fn format_data(content: Content, mime: &str) -> Result<Bytes, Error> {
+    content
+        .format(mime)
+        .cloned()
+        .ok_or(Error::ContentNotAvailable)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn a_format_read_yields_the_bytes_of_its_mime() {
+        let content =
+            Content::Formats(vec![Format::new("application/x-example", b"42".as_slice())]);
+
+        assert_eq!(
+            format_data(content, "application/x-example"),
+            Ok(Bytes::from_static(b"42"))
+        );
+    }
+
+    #[test]
+    fn a_format_read_refuses_other_content() {
+        let wrong_mime = Content::Formats(vec![Format::html("<p>")]);
+
+        assert_eq!(
+            format_data(wrong_mime, "text/plain"),
+            Err(Error::ContentNotAvailable)
+        );
+        assert_eq!(
+            format_data(Content::Text("plain".to_owned()), "text/plain"),
+            Err(Error::ContentNotAvailable)
+        );
+    }
 }

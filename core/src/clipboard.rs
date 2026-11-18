@@ -87,6 +87,110 @@ pub enum Content {
     #[cfg(feature = "image")]
     Image(Image),
     Files(Vec<PathBuf>),
+    /// The same content in several [`Format`]s, offered all at once.
+    ///
+    /// A reader picks the one it understands, so a copy can carry plain text
+    /// for every app next to HTML, a PNG or an app's own type. Reading a
+    /// [`Kind::Mime`] yields this variant with the one format read.
+    ///
+    /// Backends without MIME offers write a fallback instead; see the
+    /// platform's clipboard for which.
+    Formats(Vec<Format>),
+}
+
+impl Content {
+    /// The data of the [`Format`] with the given MIME type, if this content
+    /// holds one.
+    pub fn format(&self, mime: &str) -> Option<&crate::Bytes> {
+        let Self::Formats(formats) = self else {
+            return None;
+        };
+
+        formats
+            .iter()
+            .find(|format| format.mime == mime)
+            .map(|format| &format.data)
+    }
+}
+
+impl From<Vec<Format>> for Content {
+    fn from(formats: Vec<Format>) -> Self {
+        Self::Formats(formats)
+    }
+}
+
+/// One representation of some clipboard content, named by its MIME type.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Format {
+    /// The MIME type, such as `text/plain` or `image/png`.
+    pub mime: String,
+
+    /// The bytes, encoded as the MIME type says.
+    pub data: crate::Bytes,
+}
+
+impl Format {
+    /// The MIME type of UTF-8 plain text.
+    pub const TEXT: &'static str = "text/plain";
+    /// The MIME type of HTML.
+    pub const HTML: &'static str = "text/html";
+    /// The MIME type of a PNG image.
+    pub const PNG: &'static str = "image/png";
+
+    /// Creates a [`Format`] with the given MIME type and data.
+    pub fn new(mime: impl Into<String>, data: impl Into<crate::Bytes>) -> Self {
+        Self {
+            mime: mime.into(),
+            data: data.into(),
+        }
+    }
+
+    /// Plain UTF-8 text.
+    pub fn text(text: impl Into<String>) -> Self {
+        Self::new(Self::TEXT, text.into())
+    }
+
+    /// An HTML fragment.
+    pub fn html(html: impl Into<String>) -> Self {
+        Self::new(Self::HTML, html.into())
+    }
+
+    /// An encoded PNG image.
+    pub fn png(png: impl Into<crate::Bytes>) -> Self {
+        Self::new(Self::PNG, png)
+    }
+
+    /// Whether this is plain text, with or without a charset parameter.
+    pub fn is_text(&self) -> bool {
+        is_text_mime(&self.mime)
+    }
+
+    /// The data as UTF-8, if it is valid UTF-8.
+    pub fn as_str(&self) -> Option<&str> {
+        std::str::from_utf8(&self.data).ok()
+    }
+}
+
+/// Whether the MIME type names UTF-8 plain text: `text/plain`, with no
+/// charset or with `charset=utf-8`.
+pub fn is_text_mime(mime: &str) -> bool {
+    let mut parts = mime.split(';').map(str::trim);
+
+    if !parts
+        .next()
+        .is_some_and(|essence| essence.eq_ignore_ascii_case(Format::TEXT))
+    {
+        return false;
+    }
+
+    parts.all(|parameter| {
+        let Some((name, value)) = parameter.split_once('=') else {
+            return parameter.is_empty();
+        };
+
+        !name.trim().eq_ignore_ascii_case("charset")
+            || value.trim().trim_matches('"').eq_ignore_ascii_case("utf-8")
+    })
 }
 
 impl From<String> for Content {
@@ -118,6 +222,9 @@ pub enum Kind {
     #[cfg(feature = "image")]
     Image,
     Files,
+    /// The content offered under the given MIME type, as
+    /// [`Content::Formats`] with that one format.
+    Mime(&'static str),
 }
 
 /// A clipboard image.
@@ -160,6 +267,40 @@ pub enum Error {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn formats_find_their_data_by_mime() {
+        let content = Content::from(vec![
+            Format::text("plain"),
+            Format::html("<b>rich</b>"),
+            Format::new("application/x-example+json", b"{}".as_slice()),
+        ]);
+
+        assert_eq!(
+            content.format("text/html").map(AsRef::as_ref),
+            Some(b"<b>rich</b>".as_slice())
+        );
+        assert_eq!(
+            content
+                .format("application/x-example+json")
+                .map(AsRef::as_ref),
+            Some(b"{}".as_slice())
+        );
+        assert_eq!(content.format("image/png"), None);
+        assert_eq!(Content::Text("plain".to_owned()).format("text/plain"), None);
+    }
+
+    #[test]
+    fn only_utf8_plain_text_counts_as_text() {
+        assert!(is_text_mime("text/plain"));
+        assert!(is_text_mime("text/plain;charset=utf-8"));
+        assert!(is_text_mime("TEXT/PLAIN; charset=\"UTF-8\""));
+        assert!(!is_text_mime("text/plain;charset=utf-16"));
+        assert!(!is_text_mime("text/html"));
+        assert!(!is_text_mime("text/plainish"));
+        assert!(Format::text("x").is_text());
+        assert_eq!(Format::text("héllo").as_str(), Some("héllo"));
+    }
 
     #[test]
     fn merging_keeps_a_primary_read_from_either_side() {
