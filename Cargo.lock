@@ -6384,6 +6384,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "text_drag"
+version = "0.1.0"
+dependencies = [
+ "iced",
+ "tracing-subscriber",
+]
+
+[[package]]
 name = "the_matrix"
 version = "0.1.0"
 dependencies = [
