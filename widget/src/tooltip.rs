@@ -1,7 +1,8 @@
 //! Tooltips display a hint of information over some element when hovered.
 //!
 //! By default, the tooltip is displayed immediately, however, this can be adjusted
-//! with [`Tooltip::delay`].
+//! with [`Tooltip::delay`]. It also shows at once, whatever the delay, while a widget inside
+//! it holds the keyboard focus, and Escape hides it until the focus or the pointer moves on.
 //!
 //! # Example
 //! ```no_run
@@ -25,6 +26,7 @@
 //! }
 //! ```
 use crate::container;
+use crate::core::keyboard;
 use crate::core::layout::{self, Layout};
 use crate::core::mouse;
 use crate::core::overlay;
@@ -200,43 +202,54 @@ where
         shell: &mut Shell<'_, Message>,
         viewport: &Rectangle,
     ) {
-        if let Event::Mouse(_) | Event::Window(window::Event::RedrawRequested(_)) = event {
+        let redraw = matches!(event, Event::Window(window::Event::RedrawRequested(_)));
+
+        if matches!(event, Event::Mouse(_)) || redraw {
             let state = tree.state.downcast_mut::<State>();
             let now = Instant::now();
             let cursor_position = cursor.position_over(layout.bounds());
 
-            match (*state, cursor_position) {
-                (State::Idle, Some(cursor_position)) => {
+            match (state.hover, cursor_position) {
+                (Hover::Idle, Some(cursor_position)) => {
+                    // The pointer came back: an Escape before no longer holds.
+                    state.dismissed = false;
+
                     if self.delay == Duration::ZERO {
-                        *state = State::Open { cursor_position };
+                        state.hover = Hover::Open { cursor_position };
                         shell.invalidate_layout();
                     } else {
-                        *state = State::Hovered { at: now };
+                        state.hover = Hover::Hovered { at: now };
                     }
 
                     shell.request_redraw_at(now + self.delay);
                 }
-                (State::Hovered { .. }, None) => {
-                    *state = State::Idle;
+                (Hover::Hovered { .. }, None) => {
+                    state.hover = Hover::Idle;
                 }
-                (State::Hovered { at, .. }, _) if at.elapsed() < self.delay => {
+                (Hover::Hovered { at, .. }, _) if at.elapsed() < self.delay => {
                     shell.request_redraw_at(now + self.delay - at.elapsed());
                 }
-                (State::Hovered { .. }, Some(cursor_position)) => {
-                    *state = State::Open { cursor_position };
+                (Hover::Hovered { .. }, Some(cursor_position)) => {
+                    state.hover = Hover::Open { cursor_position };
                     shell.invalidate_layout();
                 }
-                (State::Open { .. }, None) => {
-                    *state = State::Idle;
+                (Hover::Open { .. }, None) => {
+                    state.hover = Hover::Idle;
                     shell.invalidate_layout();
 
-                    if !matches!(event, Event::Window(window::Event::RedrawRequested(_)),) {
+                    if !redraw {
                         shell.request_redraw();
                     }
                 }
-                (State::Open { .. }, Some(_)) | (State::Idle, None) => (),
+                (Hover::Open { .. }, Some(_)) | (Hover::Idle, None) => (),
             }
         }
+
+        let shown = tree
+            .state
+            .downcast_ref::<State>()
+            .shown_at(layout.bounds())
+            .is_some();
 
         self.content.as_widget_mut().update(
             &mut tree.children[0],
@@ -247,6 +260,48 @@ where
             shell,
             viewport,
         );
+
+        // Escape puts the tooltip away without moving the focus. The key goes on to the app.
+        if shown
+            && let Event::Keyboard(keyboard::Event::KeyPressed {
+                key: keyboard::Key::Named(keyboard::key::Named::Escape),
+                ..
+            }) = event
+        {
+            tree.state.downcast_mut::<State>().dismissed = true;
+            shell.invalidate_layout();
+            shell.request_redraw();
+        }
+
+        // Focus moves by key, by press or by an operation, which redraws.
+        if matches!(
+            event,
+            Event::Keyboard(_)
+                | Event::Mouse(mouse::Event::ButtonPressed(_) | mouse::Event::ButtonReleased(_))
+                | Event::Touch(_)
+        ) || redraw
+        {
+            let mut holds = HoldsFocus(false);
+            self.content.as_widget_mut().operate(
+                &mut tree.children[0],
+                layout,
+                renderer,
+                &mut holds,
+            );
+
+            let state = tree.state.downcast_mut::<State>();
+            if holds.0 != state.focused {
+                state.focused = holds.0;
+                if holds.0 {
+                    state.dismissed = false;
+                }
+                shell.invalidate_layout();
+
+                if !redraw {
+                    shell.request_redraw();
+                }
+            }
+        }
     }
 
     fn mouse_interaction(
@@ -307,7 +362,7 @@ where
             translation,
         );
 
-        let tooltip = if let State::Open { cursor_position } = *state {
+        let tooltip = if let Some(cursor_position) = state.shown_at(layout.bounds()) {
             Some(overlay::Element::new(Box::new(Overlay {
                 position: layout.position() + translation,
                 tooltip: &mut self.tooltip,
@@ -385,7 +440,32 @@ pub enum Position {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Default)]
-enum State {
+struct State {
+    hover: Hover,
+    /// A widget inside the content holds the focus.
+    focused: bool,
+    /// Escape put the tooltip away.
+    dismissed: bool,
+}
+
+impl State {
+    /// Where the tooltip follows the cursor from, while it shows. A focus shows it from the
+    /// middle of the content.
+    fn shown_at(&self, bounds: Rectangle) -> Option<Point> {
+        if self.dismissed {
+            return None;
+        }
+
+        match self.hover {
+            Hover::Open { cursor_position } => Some(cursor_position),
+            _ if self.focused => Some(bounds.center()),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Default)]
+enum Hover {
     #[default]
     Idle,
     Hovered {
@@ -394,6 +474,24 @@ enum State {
     Open {
         cursor_position: Point,
     },
+}
+
+/// Finds whether any focusable it visits holds the focus.
+struct HoldsFocus(bool);
+
+impl widget::Operation for HoldsFocus {
+    fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn widget::Operation)) {
+        operate(self);
+    }
+
+    fn focusable(
+        &mut self,
+        _id: Option<&widget::Id>,
+        _bounds: Rectangle,
+        state: &mut dyn widget::operation::Focusable,
+    ) {
+        self.0 |= state.is_focused();
+    }
 }
 
 struct Overlay<'a, 'b, Message, Theme, Renderer>
@@ -558,5 +656,177 @@ impl widget::Operation for ReadOnly<'_> {
 
     fn text(&mut self, id: Option<&widget::Id>, bounds: Rectangle, text: &str) {
         self.0.text(id, bounds, text);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::core::keyboard::key;
+    use crate::{Button, Space, Theme};
+
+    type TestTooltip<'a> = Tooltip<'a, (), Theme, ()>;
+
+    fn tooltip(delay: Duration) -> TestTooltip<'static> {
+        Tooltip::new(
+            Button::new(Space::new().width(40).height(20)).on_press(()),
+            Space::new().width(30).height(10),
+            Position::Bottom,
+        )
+        .delay(delay)
+    }
+
+    struct Setup {
+        tooltip: TestTooltip<'static>,
+        tree: widget::Tree,
+        node: layout::Node,
+    }
+
+    impl Setup {
+        fn new(delay: Duration) -> Self {
+            let mut tooltip = tooltip(delay);
+            let mut tree = widget::Tree::new(&tooltip as &dyn Widget<(), Theme, ()>);
+            let node = tooltip.layout(
+                &mut tree,
+                &(),
+                &layout::Limits::new(Size::ZERO, Size::new(200.0, 100.0)),
+            );
+
+            Self {
+                tooltip,
+                tree,
+                node,
+            }
+        }
+
+        fn send(&mut self, event: Event, cursor: mouse::Cursor) {
+            let mut messages = Vec::new();
+            let mut shell = Shell::new(&mut messages);
+
+            self.tooltip.update(
+                &mut self.tree,
+                &event,
+                Layout::new(&self.node),
+                cursor,
+                &(),
+                &mut shell,
+                &Rectangle::with_size(Size::new(200.0, 100.0)),
+            );
+        }
+
+        fn redraw(&mut self) {
+            self.send(
+                Event::Window(window::Event::RedrawRequested(Instant::now())),
+                mouse::Cursor::Unavailable,
+            );
+        }
+
+        /// Focuses or unfocuses the button, as a keyboard's focus operation does, then redraws
+        /// as the runtime does after one.
+        fn focus(&mut self, focused: bool) {
+            struct Focus(bool);
+
+            impl widget::Operation for Focus {
+                fn traverse(&mut self, operate: &mut dyn FnMut(&mut dyn widget::Operation)) {
+                    operate(self);
+                }
+
+                fn focusable(
+                    &mut self,
+                    _id: Option<&widget::Id>,
+                    _bounds: Rectangle,
+                    state: &mut dyn widget::operation::Focusable,
+                ) {
+                    if self.0 {
+                        state.focus();
+                    } else {
+                        state.unfocus();
+                    }
+                }
+            }
+
+            self.tooltip.operate(
+                &mut self.tree,
+                Layout::new(&self.node),
+                &(),
+                &mut Focus(focused),
+            );
+            self.redraw();
+        }
+
+        fn escape(&mut self) {
+            self.send(
+                Event::Keyboard(keyboard::Event::KeyPressed {
+                    key: keyboard::Key::Named(key::Named::Escape),
+                    modified_key: keyboard::Key::Named(key::Named::Escape),
+                    physical_key: key::Physical::Code(key::Code::Escape),
+                    location: keyboard::Location::Standard,
+                    modifiers: keyboard::Modifiers::empty(),
+                    text: None,
+                    repeat: false,
+                }),
+                mouse::Cursor::Unavailable,
+            );
+        }
+
+        fn shown(&mut self) -> bool {
+            self.tooltip
+                .overlay(
+                    &mut self.tree,
+                    Layout::new(&self.node),
+                    &(),
+                    &Rectangle::with_size(Size::new(200.0, 100.0)),
+                    Vector::ZERO,
+                )
+                .is_some()
+        }
+    }
+
+    #[test]
+    fn focus_shows_the_tooltip_at_once_and_losing_it_hides_it() {
+        let mut setup = Setup::new(Duration::from_secs(1));
+        setup.redraw();
+        assert!(!setup.shown());
+
+        setup.focus(true);
+        assert!(setup.shown(), "a focus shows it without the hover delay");
+
+        setup.focus(false);
+        assert!(!setup.shown(), "the focus moved on");
+    }
+
+    #[test]
+    fn escape_hides_the_tooltip_until_the_focus_comes_back() {
+        let mut setup = Setup::new(Duration::ZERO);
+        setup.focus(true);
+        assert!(setup.shown());
+
+        setup.escape();
+        assert!(!setup.shown(), "Escape puts it away");
+        setup.redraw();
+        assert!(!setup.shown(), "and it stays away while the focus stays");
+
+        setup.focus(false);
+        setup.focus(true);
+        assert!(setup.shown(), "a new focus shows it again");
+    }
+
+    #[test]
+    fn escape_hides_a_hover_tooltip_until_the_pointer_comes_back() {
+        let mut setup = Setup::new(Duration::ZERO);
+        let over = mouse::Cursor::Available(Point::new(10.0, 10.0));
+        let moved = |position| Event::Mouse(mouse::Event::CursorMoved { position });
+
+        setup.send(moved(Point::new(10.0, 10.0)), over);
+        assert!(setup.shown());
+
+        setup.escape();
+        setup.send(moved(Point::new(12.0, 10.0)), over);
+        assert!(!setup.shown(), "moving inside does not bring it back");
+
+        setup.send(moved(Point::new(150.0, 80.0)), mouse::Cursor::Unavailable);
+        setup.send(moved(Point::new(10.0, 10.0)), over);
+        assert!(setup.shown(), "coming back does");
     }
 }
