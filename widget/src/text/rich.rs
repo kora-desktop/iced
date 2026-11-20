@@ -4,6 +4,7 @@ use crate::core::layout;
 use crate::core::mouse::{self, click};
 use crate::core::renderer;
 use crate::core::text::{ADVANCED_AUTO_SHAPING, Hit, Paragraph, Span, Target};
+use crate::core::widget::operation::accessible::{Accessible, Role};
 use crate::core::widget::operation::{self, Operation};
 use crate::core::widget::text::{
     self, Alignment, Catalog, Ellipsis, LineHeight, Shaping, Style, StyleFn, Wrapping,
@@ -902,13 +903,43 @@ where
         _renderer: &Renderer,
         operation: &mut dyn Operation,
     ) {
-        if !self.selectable_text {
-            return;
-        }
-
         let state = tree
             .state
             .downcast_mut::<State<Link, Renderer::Paragraph>>();
+        let spans = self.spans.as_ref().as_ref();
+
+        let content: String = spans.iter().map(|span| span.text.as_ref()).collect();
+        operation.text(None, layout.bounds(), &content);
+
+        if self.on_link_click.is_some() {
+            let translation = layout.position() - Point::ORIGIN;
+
+            for (index, span) in spans.iter().enumerate() {
+                if span.link.is_none() {
+                    continue;
+                }
+
+                // A link that wraps keeps only its first line, so a click at
+                // the node's center lands on the link. One cut off shows nothing.
+                let Some(bounds) = state.paragraph.span_bounds(index).first().copied() else {
+                    continue;
+                };
+
+                operation.accessible(
+                    None,
+                    bounds + translation,
+                    &Accessible {
+                        role: Role::Link,
+                        label: Some(span.text.as_ref()),
+                        ..Accessible::default()
+                    },
+                );
+            }
+        }
+
+        if !self.selectable_text {
+            return;
+        }
 
         let origin = layout.bounds().anchor(
             state.paragraph.min_bounds(),
